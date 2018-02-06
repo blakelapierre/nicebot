@@ -15,9 +15,9 @@ import * as nicehash from 'nicehash';
 const nh = new nicehash({apiId: '1233015', apiKey: ''});
 
 
-runAndSchedule(checkAndRun, 10 * 1000);
+// runAndSchedule(checkAndRun, 10 * 1000);
 // runAndSchedule(checkAndRunTest, 10 * 1000);
-// runAndSchedule(checkOrders, 30 * 1000);
+runAndSchedule(checkOrders, 30 * 1000);
 
 function runAndSchedule(fn, interval) {
   setInterval(fn, interval);
@@ -47,10 +47,12 @@ function printOrdersSummary(location, algo, orders) {
   const total_speed = orders.reduce((sum, {accepted_speed}) => sum + parseFloat(accepted_speed) * 1000, 0);
 
 
-  let cheapestFilled = orders[0];
+  let cheapestFilled = orders[0],
+      cheapestGreaterThan1MH = orders[0];
 
   orders.forEach(order => {
     if (order.workers > 0 && parseFloat(order.price) < parseFloat(cheapestFilled.price)) cheapestFilled = order;
+    if (order.workers > 0 && parseFloat(order.price) < parseFloat(cheapestGreaterThan1MH.price) && parseFloat(order.accepted_speed) * 1000 > 1) cheapestGreaterThan1MH = order;
   });
 
   // console.log('Cheapest filled order', renderLocation(location), renderAlgo(algo), cheapestFilled);
@@ -65,6 +67,12 @@ function printOrdersSummary(location, algo, orders) {
       workers: cheapestFilled.workers,
       accepted_speed: parseFloat(cheapestFilled.accepted_speed) * 1000,
       alive: cheapestFilled.alive
+    },
+    cheapest_greater_than_1_MH: {
+      price: cheapestGreaterThan1MH.price,
+      workers: cheapestGreaterThan1MH.workers,
+      accepted_speed: parseFloat(cheapestGreaterThan1MH.accepted_speed) * 1000,
+      alive: cheapestGreaterThan1MH.alive
     }
   });
   // orders.forEach(({accepted_speed}) => {
