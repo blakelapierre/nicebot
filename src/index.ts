@@ -12,12 +12,12 @@ import {fetchUrl} from 'fetch';
 
 import * as nicehash from 'nicehash';
 
-const nh = new nicehash({apiId: '1233015', apiKey: 'f3848d78-a9a7-ce34-afda-a888dcbad2f3'});
+const nh = new nicehash({apiId: '1233015', apiKey: ''});
 
 
-// runAndSchedule(checkAndRun, 10 * 1000);
+runAndSchedule(checkAndRun, 10 * 1000);
 // runAndSchedule(checkAndRunTest, 10 * 1000);
-runAndSchedule(checkOrders, 30 * 1000);
+// runAndSchedule(checkOrders, 30 * 1000);
 
 function runAndSchedule(fn, interval) {
   setInterval(fn, interval);
