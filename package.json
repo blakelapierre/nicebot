@@ -36,5 +36,9 @@
     "traceur-runtime": "0.0.59",
     "typescript": "^2.6.1",
     "vinyl-source-stream": "^1.1.0"
+  },
+  "dependencies": {
+    "fetch": "^1.1.0",
+    "nicehash": "^1.0.2"
   }
 }
