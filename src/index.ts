@@ -1,5 +1,7 @@
-const apiId = '1233015',
-      apiKey = '';
+import chalk from 'chalk';
+
+const apiId = process.env['API_ID'],
+      apiKey = process.env['API_KEY'];
 
 import {createAPI} from './apiInterfaces';
 
@@ -8,37 +10,79 @@ const {rpcWallet, rpcDaemon, daemonGetInfo} = createAPI({host: '127.0.0.1', port
 
 runAndSchedule(transferWalletToTradeOgre, 60 * 1000);
 
+const collectors = [
+  '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'
+];
+
+const collectorAmount = 1;
+
 function transferWalletToTradeOgre() {
   rpcWallet('getbalance', {'address': 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR',}, (error, response) => {
     if (error) return console.error('error getting balance', error);
 
     const {available_balance, locked_amount} = response;
 
-    console.log(`$$$$$$$$$$$$ Wallet Balance: ${(available_balance/100).toFixed(2)} available, ${(locked_amount/100).toFixed(2)} locked ||| ${((available_balance + locked_amount) / 100).toFixed(2)} total $$$$$$$$$$$$`);
+    console.log(`${chalk.green('$$$$$$$$$$$$')} Wallet Balance: ${(available_balance/100).toFixed(2)} available, ${(locked_amount/100).toFixed(2)} locked ||| ${chalk.green(((available_balance + locked_amount) / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
 
     if (available_balance >  100) {
-      const toSend = available_balance - 10,
-            turtleBag_amount = Math.floor(toSend * 0.02),
-            wallet_amount = toSend - turtleBag_amount;
-      rpcWallet('transfer', {
-        'payment_id': 'face2014b18dbf6fb7f32ed3d14203cb6c50c54572387ce55abb5b50567bae7e',
-        'mixin': 4,
-        'fee': 10,
-        'destinations': [{
-          'address': 'TRTLv1Hqo3wHdqLRXuCyX3MwvzKyxzwXeBtycnkDy8ceFp4E23bm3P467xLEbUusH6Q1mqQUBiYwJ2yULJbvr5nKe8kcyc4uyps',
-          'amount': wallet_amount
-        },{
-          'address': 'TRTLuzWZbe7VvbPfTg2XcJfqL26vsBE3MK45LUd3HAYtRbi7feyArC3THhaoSRABsvMrp7XRRDcH8Y8R4FJ2Zr7cEFfyxqRm6jS',
-          'amount': turtleBag_amount
-        }]
-      }, (error, response) => {
-        if (error) return console.error('error transferring', error);
+      const toSend = available_balance - 10 - (collectors.length * collectorAmount),
+            // sidebag_amount = Math.floor(toSend * 0.01),
+            turtlebag_amount = Math.floor(toSend * 0.02),
+            wallet_amount = toSend - turtlebag_amount/* - sidebag_amount*/;
 
-        console.log(`-------->>>>>>>> ${(wallet_amount - 10) / 100} to tradeogre!`);
-        console.log(`-------->>>>>>>> ${(turtleBag_amount - 10) / 100} to turtlebag!`);
-      });
+      // rpcWallet('createAddress', [], (error, response) => {
+      //   if (error) return console.error('crror creating address', error);
+
+      //   const sidebag_address = response.address;
+
+        rpcWallet('transfer', {
+          'payment_id': 'face2014b18dbf6fb7f32ed3d14203cb6c50c54572387ce55abb5b50567bae7e',
+          'mixin': 4,
+          'fee': 10,
+          'destinations': [{
+            'address': 'TRTLv1Hqo3wHdqLRXuCyX3MwvzKyxzwXeBtycnkDy8ceFp4E23bm3P467xLEbUusH6Q1mqQUBiYwJ2yULJbvr5nKe8kcyc4uyps',
+            'amount': wallet_amount
+          },{
+            'address': 'TRTLuzWZbe7VvbPfTg2XcJfqL26vsBE3MK45LUd3HAYtRbi7feyArC3THhaoSRABsvMrp7XRRDcH8Y8R4FJ2Zr7cEFfyxqRm6jS',
+            'amount': turtlebag_amount
+          }].concat(collectors.map(address => ({address, amount: collectorAmount})))
+          // },{
+          //   'address': sidebag_address,
+          //   'amount': sidebag_amount
+        }, (error, response) => {
+          if (error) return console.error('error transferring', error);
+
+          printTransfer((wallet_amount - 10) / 100, `tradeogre`);
+          printTransfer((turtlebag_amount - 10) / 100, `turtlebag`);
+          collectors.forEach(address => printTransfer(collectorAmount, address));
+          // console.log(`-------->>>>>>>> ${(sidebag_amount - 10) / 100} to ${sidebag_address} (sidebag)!`);
+        });
+      // });
     }
   });
+}
+
+function printTransfer(amount, destination) {
+  console.log(`-------->>>>>>>> ${amount} to ${destination}!`);
 }
 
 const config = {
@@ -94,14 +138,14 @@ const latestOrders = {
   }
 };
 
-let trtlSatoshiPrice = 4;
+let trtlSatoshiPrice = 2;
 
 const algo = 22;
 
 function calculateLimit(roi) {
-  if (roi < 0.2) return 0.01;
+  if (roi < 0.3) return 0.01;
   // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (0.5 + ((roi - 0.2) / 0.1) * 0.25) / managedOrders.length;
+  else if (roi < 2.4) return (0.01 + /*0.5 + */((roi - 0.3) / 0.1) * 0.2) / managedOrders.length;
   return 0;
 }
 
@@ -218,13 +262,14 @@ function checkDifficulty() {
         const diff = difficulty - lastDifficulty;
         const secondsSinceLast = (timeSinceLast / 1000).toFixed(1);
         if (diff > 0) {
-          console.log(`^^^^^^^^ Difficulty: ${difficulty} (${difficulty > lastDifficulty ? '+' : ''}${difficulty - lastDifficulty})(${difficulty > lastDifficulty ? '+' : ''}${((difficulty - lastDifficulty) / lastDifficulty * 100).toFixed(2)}%)| |${height} height| (${secondsSinceLast} s [${(timeSinceLast / (30 * 10)).toFixed(2)}%]) ^^^^^^^^`);
+
+          console.log(chalk.red(`^^^^^^^^ ${renderBlockInfo(difficulty, lastDifficulty, height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
         }
         else if (diff < 0) {
-          console.log(`vvvvvvvv Difficulty: ${difficulty} (${difficulty > lastDifficulty ? '+' : ''}${difficulty - lastDifficulty})(${difficulty > lastDifficulty ? '+' : ''}${((difficulty - lastDifficulty) / lastDifficulty * 100).toFixed(2)}%)| |${height} height| (${secondsSinceLast} s [${(timeSinceLast / (30 * 10)).toFixed(2)}%]) vvvvvvvv`);
+          console.log(chalk.green(`vvvvvvvv ${renderBlockInfo(difficulty, lastDifficulty, height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
         }
         else {
-          console.log(`======== Difficulty: ${difficulty} (${difficulty > lastDifficulty ? '+' : ''}${difficulty - lastDifficulty})(${difficulty > lastDifficulty ? '+' : ''}${((difficulty - lastDifficulty) / lastDifficulty * 100).toFixed(2)}%)| |${height} height| (${secondsSinceLast} s [${(timeSinceLast / (30 * 10)).toFixed(2)}%]) ========`);
+          console.log(chalk.yellow(`======== ${renderBlockInfo(difficulty, lastDifficulty, height, secondsSinceLast, timeSinceLast)} ========`));
         }
         lastDifficulty = difficulty;
         difficultyEmitter.emit('difficulty', difficulty);
@@ -238,6 +283,13 @@ function checkDifficulty() {
       }
       console.log('error getting difficulty', error);
     });
+}
+
+function renderBlockInfo(difficulty, lastDifficulty, height, secondsSinceLast, timeSinceLast) {
+  return `Difficulty: ${difficulty} (${difficulty > lastDifficulty ? '+' : ''}${difficulty - lastDifficulty})(${difficulty > lastDifficulty ? '+' : ''}${((difficulty - lastDifficulty) / lastDifficulty * 100).toFixed(2)}%)| |${height} height| (${secondsSinceLast} s [${(timeSinceLast / (30 * 10)).toFixed(2)}%])`;
+}
+
+function renderBlockTime(time) {
 }
 
 function slowAllOrders() {
@@ -391,7 +443,7 @@ function printOrdersSummary(location, algo, orders = []) {
   const cheapestFilled = cheapestFilledAtLocation[location],
         cheapestGreaterThan1MH = cheapestGreaterThan1MHAtLocation[location];
 
-  const s = `[Cheapest > 1MH/s: ${cheapestGreaterThan1MH.price} (${(parseFloat(cheapestGreaterThan1MH.accepted_speed) * 1000).toFixed(2)} MH/s)] [${renderLocation(location)}] [${calculateROI(lastDifficulty, parseFloat(cheapestGreaterThan1MH.price) + 0.0001, trtlSatoshiPrice).toFixed(3)} ROI] ${renderAlgo(algo)} [${orders.length} orders] (${total_speed.toFixed(2)} MH/s)`;
+  const s = `[Cheapest > 1MH/s: ${printPrice(cheapestGreaterThan1MH.price)} (${(parseFloat(cheapestGreaterThan1MH.accepted_speed) * 1000).toFixed(2)} MH/s)] [${renderLocation(location)}] [${printROI(calculateROI(lastDifficulty, parseFloat(cheapestGreaterThan1MH.price) + 0.0001, trtlSatoshiPrice))} ROI] ${renderAlgo(algo)} [${orders.length} orders] (${total_speed.toFixed(2)} MH/s)`;
 
   if (s != summaryPrints[location][algo]) console.log(s);
   summaryPrints[location][algo] = s;
@@ -454,7 +506,11 @@ function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, li
 
   managedOrders.push(orderData);
 
-  difficultyEmitter.on('difficulty', difficulty => checkROIWithDifficulty(difficulty, startNiceHash, slowNiceHash));
+  difficultyEmitter.on('difficulty', difficulty => {
+    checkROIWithDifficulty(difficulty, startNiceHash, slowNiceHash);
+    printOrders(0, 22);
+    printOrders(1, 22);
+  });
   cheapestEmitter.on('updated', () => checkROIWithDifficulty(lastDifficulty, startNiceHash, slowNiceHash));
 
   checkROIWithDifficulty(lastDifficulty, startNiceHash, slowNiceHash);
@@ -501,8 +557,8 @@ function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, li
       setOrderLimit(newLimit)
         .then(response => {
           if (response.body.result.success || response.body.result.error === 'This limit already set.') {
-            console.log('new order limit set:', newLimit.toFixed(2));
             orderData.limit = newLimit;
+            console.log(chalk.blue('new order limit set:', newLimit.toFixed(2)));
           }
         })
         .catch(error => {
@@ -531,7 +587,7 @@ function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, li
       setOrderLimit(0.01)
         .then(response => {
           if (response.result.success) orderData.limit = 0.01;
-          console.log('order limit reponse', response.body);
+          console.log('order limit response', response.body);
         })
         .catch(error => {
           console.log('error setting order limit', error);
@@ -582,7 +638,7 @@ function runAndSchedule(fn, interval) {
 }
 
 function updateOrdersStats(location, algo) {
-  nhRequest('getMyOrders', [location, algo])
+  return nhRequest('getMyOrders', [location, algo])
     .then(response => {
       const {orders} = response.body.result;
 
@@ -596,11 +652,35 @@ function updateOrdersStats(location, algo) {
         }
       });
       printOrders(location, algo);
-    });
+    })
+    .catch(error => console.log('Error updating order stats', error));
 }
+
+let lastBTCAvail = 0;
 
 function printOrders(location, algo) {
   Object.values(ordersDB[location][algo]).forEach(printOrder);
+
+  if (Object.values(ordersDB).length > 1) {
+    let btc_avail = 0, orders = 0, avails = [];
+    Object
+      .values(ordersDB)
+      .forEach(location =>
+        Object
+          .values(location)
+          .forEach(algo =>
+            Object
+              .values(algo)
+              .forEach(order => {
+                const [big, little] = order['btc_avail'].split('.');
+                btc_avail += parseInt(little.padEnd(8, '0')) + parseInt(big) * 100000000;
+                avails.push([parseInt(big), parseInt(little.padEnd(8, '0'))]);
+                orders++;
+              })));
+
+    if (lastBTCAvail !== btc_avail) console.log('BTC AVAIL:', btc_avail / 100000000, 'from', orders, 'orders');
+    lastBTCAvail = btc_avail;
+  }
 }
 
 const lastPrints = {
@@ -616,16 +696,33 @@ function printOrder({id, algo, btc_avail, limit_speed, price, end, workers, btc_
   const avail = parseFloat(btc_avail),
         paid = parseFloat(btc_paid),
         roi = calculateROI(lastDifficulty, price, trtlSatoshiPrice),
-        costPerHour = (parseFloat(accepted_speed) * 1000) * price / 24,
-        profitPerHour = costPerHour * (1 + roi) - costPerHour,
+        limitCostPerHour = limit_speed * price / 24,
+        limitProfitPerHour = limitCostPerHour * (1 + roi) - limitCostPerHour,
+        acceptedCostPerHour = (parseFloat(accepted_speed) * 1000) * price / 24,
+        acceptedProfitPerHour = acceptedCostPerHour * (1 + roi) - acceptedCostPerHour,
         {workersAbove, workersBelow} = separateWorkersOnOrder(id, location, algo, price),
         marketPosition = workersBelow / (workersAbove + workersBelow),
-        s = `[${roi.toFixed(3)} ROI] [B ${price}] [B${profitPerHour.toFixed(4)}/hr] [${limit_speed} limit] [${(parseFloat(accepted_speed) * 1000).toFixed(2)} MH/s] [${workers} w (${(marketPosition * 100).toFixed(1)}%)] [${renderProgress(1 - (avail / (avail + paid)))}] [${avail.toFixed(5)} avail] ${renderLocation(location)} ${id}`;
+        s = `[${printROI(roi)} ROI][${printPrice(`B ${price}`)}][${printLimit(limit_speed)} limit <B${printRate(limitProfitPerHour)}/hr>][${printSpeed((parseFloat(accepted_speed) * 1000))} MH/s <B${printRate(acceptedProfitPerHour)}/hr>][${workers} w (${(marketPosition * 100).toFixed(1)}%)][${renderProgress(1 - (avail / (avail + paid)))}] [${avail.toFixed(5)} avail] ${renderLocation(location)} ${id}`;
 
 
   if (s != lastPrints[location][algo][id]) console.log(s);
 
   lastPrints[location][algo][id] = s;
+}
+
+function printROI(roi) {
+  const format = roi.toFixed(3);
+  if (roi > 0.3) return chalk.green(format);
+  else if (roi < 0) return chalk.red(format);
+  return chalk.yellow(format);
+}
+
+function printPrice(price) { return chalk.yellow(price); }
+function printRate(rate) { return chalk[rate < 0 ? 'red' : 'green'](rate.toFixed(4)); }
+function printSpeed(speed) { return chalk[speed > 0.01 ? 'blue' : 'grey'](speed.toFixed(2))}
+
+function printLimit(limit) {
+  return limit > 0.01 ? chalk.green(limit) : chalk.grey(limit);
 }
 
 function separateWorkersOnOrder(id, location, algo, price) {
@@ -651,5 +748,28 @@ function renderProgress(progress) {
   for (let i = 0; i < stars; i++) ret += '*';
   for (let i = stars; i < 10; i++) ret += ' ';
 
-  return ret;
+  if (progress > 0.75) return chalk.red(ret);
+  else if (progress > 0.45) return chalk.yellow(ret);
+  return chalk.green(ret);
+
+  // return ret;
+}
+
+// https://github.com/uxitten/polyfill/blob/master/string.polyfill.js
+// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/padEnd
+if (!String.prototype.padEnd) {
+    String.prototype.padEnd = function padEnd(targetLength,padString) {
+        targetLength = targetLength>>0; //floor if number or convert non-number to 0;
+        padString = String((typeof padString !== 'undefined' ? padString : ' '));
+        if (this.length > targetLength) {
+            return String(this);
+        }
+        else {
+            targetLength = targetLength-this.length;
+            if (targetLength > padString.length) {
+                padString += padString.repeat(targetLength/padString.length); //append to original to ensure we are longer than needed
+            }
+            return String(this) + padString.slice(0,targetLength);
+        }
+    };
 }
