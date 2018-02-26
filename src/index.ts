@@ -284,23 +284,23 @@ function checkEtnDifficulty() {
         etnLastBlock = new Date().getTime();
         lastHeights['ETN'] = height;
       }
-      if (lastEtnDifficulty !== difficulty) {
-        const diff = difficulty - lastEtnDifficulty;
+      if (lastDifficulties['ETN'] !== difficulty) {
+        const diff = difficulty - lastDifficulties['ETN'];
         const secondsSinceLast = (timeSinceLast / 1000).toFixed(1);
         if (diff > 0) {
 
-          console.log(chalk.red(`^^^^^^^^ ETN ${renderBlockInfo(difficulty, lastEtnDifficulty, height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
+          console.log(chalk.red(`^^^^^^^^ ETN ${renderBlockInfo(difficulty, lastDifficulties['ETN'], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
         }
         else if (diff < 0) {
-          console.log(chalk.green(`vvvvvvvv ETN ${renderBlockInfo(difficulty, lastEtnDifficulty, height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
+          console.log(chalk.green(`vvvvvvvv ETN ${renderBlockInfo(difficulty, lastDifficulties['ETN'], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
         }
         else {
-          console.log(chalk.yellow(`======== ETN ${renderBlockInfo(difficulty, lastEtnDifficulty, height, secondsSinceLast, timeSinceLast)} ========`));
+          console.log(chalk.yellow(`======== ETN ${renderBlockInfo(difficulty, lastDifficulties['ETN'], height, secondsSinceLast, timeSinceLast)} ========`));
         }
-        lastEtnDifficulty = difficulty;
+        lastDifficulties['ETN'] = difficulty;
         // difficultyEmitters['TRTL'].emit('difficulty', difficulty);
 
-        const roi = calculateROI(difficulty, 0.1610, etnSatoshiPrice, 6808);
+        const roi = calculateROI('ETN', difficulty, 0.1610);
 
         console.log(chalk.blue('ETN ROI'), roi);
       }
@@ -594,7 +594,7 @@ function printOrdersSummary(location, algo, orders = []) {
   const cheapestFilled = cheapestFilledAtLocation[location],
         cheapestGreaterThan1MH = cheapestGreaterThan1MHAtLocation[location];
 
-  const s = `[Cheapest > 1MH/s: ${printPrice(cheapestGreaterThan1MH.price)} (${(parseFloat(cheapestGreaterThan1MH.accepted_speed) * 1000).toFixed(2)} MH/s)] [${renderLocation(location)}] [${printROI(calculateROI(lastDifficulties['TRTL'], parseFloat(cheapestGreaterThan1MH.price) + 0.0001, trtlSatoshiPrice))} ROI] ${renderAlgo(algo)} [${orders.length} orders] (${total_speed.toFixed(2)} MH/s)`;
+  const s = `[Cheapest > 1MH/s: ${printPrice(cheapestGreaterThan1MH.price)} (${(parseFloat(cheapestGreaterThan1MH.accepted_speed) * 1000).toFixed(2)} MH/s)] [${renderLocation(location)}] [${printROI(calculateROI('TRTL', lastDifficulties['TRTL'], parseFloat(cheapestGreaterThan1MH.price) + 0.0001))} ROI] ${renderAlgo(algo)} [${orders.length} orders] (${total_speed.toFixed(2)} MH/s)`;
 
   if (s != summaryPrints[location][algo]) console.log(s);
   summaryPrints[location][algo] = s;
@@ -674,7 +674,7 @@ function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, li
   }
 
   function checkROIWithDifficulty(difficulty, start, stop) {
-    const roi = calculateROI(difficulty, orderData.price, trtlSatoshiPrice);
+    const roi = calculateROI(coin, difficulty, orderData.price);
     start(difficulty, roi);
   }
 
@@ -762,9 +762,15 @@ function renderAlgo(algo) {
 }
 
 const networkReward = 29656;
-function calculateROI(difficulty, niceHashBTCPrice, trtlSatoshiPrice = 6, networkReward = 29656) {
-  const payout = (1000000 * 86400) / difficulty * networkReward,
-        cost = niceHashBTCPrice / trtlSatoshiPrice * 100000000,
+const networkRewards = {
+  'TRTL': 29650,
+  'ETN': 6795,
+  'STL': 0
+};
+
+function calculateROI(coin, difficulty, niceHashBTCPrice) {
+  const payout = (1000000 * 86400) / difficulty * networkRewards[coin],
+        cost = niceHashBTCPrice / ogrePrices[coin] * 100000000,
         profit = payout - cost,
         roi = profit /cost;
 
@@ -845,7 +851,7 @@ const lastPrints = {
 function printOrder({id, coin, algo, btc_avail, limit_speed, price, end, workers, btc_paid, location, accepted_speed}) {
   const avail = parseFloat(btc_avail),
         paid = parseFloat(btc_paid),
-        roi = calculateROI(lastDifficulties['TRTL'], price, trtlSatoshiPrice),
+        roi = calculateROI(coin, lastDifficulties[coin], price),
         limitCostPerHour = limit_speed * price / 24,
         limitProfitPerHour = limitCostPerHour * (1 + roi) - limitCostPerHour,
         acceptedCostPerHour = (parseFloat(accepted_speed) * 1000) * price / 24,
