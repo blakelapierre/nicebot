@@ -5,38 +5,61 @@ const apiId = process.env['API_ID'],
 
 import {createAPI} from './apiInterfaces';
 
-const {rpcWallet, rpcDaemon, daemonGetInfo} = createAPI({host: '127.0.0.1', port: 11898}, {host: '127.0.0.1', port: 9999});
+const {rpcWallet: mainWallet, rpcDaemon, daemonGetInfo} = createAPI({host: '127.0.0.1', port: 11898}, {host: '127.0.0.1', port: 9999});
+const {rpcWallet: masterCollectorWallet} = createAPI({host: '127.0.0.1', port: 11898}, {host: '127.0.0.1', port: 9998});
+const {rpcWallet: stelliteWallet} = createAPI({host: 'password:password@127.0.0.1', port: 12000}, {host: '127.0.0.1', port: 1000});
+const {rpcDaemon: etnDaemon, daemonGetInfo: etnDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 26968}, {host: '127.0.0.1', port: 1000});
 
 
 runAndSchedule(transferWalletToTradeOgre, 60 * 1000);
+runAndSchedule(transferStelliteWalletToTradeOgre, 60 * 1000);
+
+// setTimeout(() => runAndSchedule(transferWalletToTradeSatoshi, 60 * 1000), 30 * 1000);
+// runAndSchedule(transferToCollectors, 0.2 * 1000);
 
 const collectors = [
-  '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'
+  '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'
 ];
 
 const collectorAmount = 1;
 
+
+function transferStelliteWalletToTradeOgre() {
+  const wallet = stelliteWallet;
+
+  wallet('sweep_all', {
+    'address': 'SEiStP7SMy1bvjkWc9dd1t2v1Et5q2DrmaqLqFTQQ9H7JKdZuATcPHUbUL3bRjxzxTDYitHsAPqF8EeCLw3bW8ARe8rYeorMw6p7nhasUgZ6S',
+    'mixin': 1,
+    'unlock_time': 0
+  }, (error, response) => {
+    if (error) return console.error('error sweeping stellite wallet', error);
+
+    if (response) console.log('swept stellite wallet', 'tx ids', response.tx_hash_list);
+  });
+}
+
 function transferWalletToTradeOgre() {
-  rpcWallet('getbalance', {'address': 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR',}, (error, response) => {
+  const wallet = mainWallet;
+  mainWallet('getbalance', {'address': 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR'}, (error, response) => {
     if (error) return console.error('error getting balance', error);
 
     const {available_balance, locked_amount} = response;
@@ -44,42 +67,103 @@ function transferWalletToTradeOgre() {
     console.log(`${chalk.green('$$$$$$$$$$$$')} Wallet Balance: ${(available_balance/100).toFixed(2)} available, ${(locked_amount/100).toFixed(2)} locked ||| ${chalk.green(((available_balance + locked_amount) / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
 
     if (available_balance >  100) {
-      const toSend = available_balance - 10 - (collectors.length * collectorAmount),
-            // sidebag_amount = Math.floor(toSend * 0.01),
+      const toSend = available_balance - 10,
             turtlebag_amount = Math.floor(toSend * 0.02),
-            wallet_amount = toSend - turtlebag_amount/* - sidebag_amount*/;
+            mastercollector_amount = Math.floor(toSend * 0.005),
+            wallet_amount = toSend - turtlebag_amount - mastercollector_amount/* - sidebag_amount*/;
 
-      // rpcWallet('createAddress', [], (error, response) => {
-      //   if (error) return console.error('crror creating address', error);
-
-      //   const sidebag_address = response.address;
-
-        rpcWallet('transfer', {
+        mainWallet('transfer', {
           'payment_id': 'face2014b18dbf6fb7f32ed3d14203cb6c50c54572387ce55abb5b50567bae7e',
           'mixin': 4,
           'fee': 10,
+          'unlock_time': 0,
           'destinations': [{
             'address': 'TRTLv1Hqo3wHdqLRXuCyX3MwvzKyxzwXeBtycnkDy8ceFp4E23bm3P467xLEbUusH6Q1mqQUBiYwJ2yULJbvr5nKe8kcyc4uyps',
             'amount': wallet_amount
           },{
             'address': 'TRTLuzWZbe7VvbPfTg2XcJfqL26vsBE3MK45LUd3HAYtRbi7feyArC3THhaoSRABsvMrp7XRRDcH8Y8R4FJ2Zr7cEFfyxqRm6jS',
             'amount': turtlebag_amount
-          }].concat(collectors.map(address => ({address, amount: collectorAmount})))
-          // },{
-          //   'address': sidebag_address,
-          //   'amount': sidebag_amount
+          },{
+            'address': 'TRTLuzHX7GC24EE3kd2poLeoZebCdUeMu8rAsMngCYWFTJwT4B9DD6ehnds1dWtjqeZmRx1yGFpNTdmw8NZ8Yq2oheZg9awb5Y7',
+            'amount': mastercollector_amount
+          }]
         }, (error, response) => {
           if (error) return console.error('error transferring', error);
 
           printTransfer((wallet_amount - 10) / 100, `tradeogre`);
           printTransfer((turtlebag_amount - 10) / 100, `turtlebag`);
-          collectors.forEach(address => printTransfer(collectorAmount, address));
-          // console.log(`-------->>>>>>>> ${(sidebag_amount - 10) / 100} to ${sidebag_address} (sidebag)!`);
+          printTransfer((mastercollector_amount - 10) / 100, `mastercollector`);
         });
-      // });
     }
   });
 }
+
+function transferWalletToTradeSatoshi() {
+  const wallet = mainWallet;
+  mainWallet('getbalance', {'address': 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR'}, (error, response) => {
+    if (error) return console.error('error getting balance', error);
+
+    const {available_balance, locked_amount} = response;
+
+    console.log(`${chalk.green('$$$$$$$$$$$$')} Wallet Balance: ${(available_balance/100).toFixed(2)} available, ${(locked_amount/100).toFixed(2)} locked ||| ${chalk.green(((available_balance + locked_amount) / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
+
+    if (available_balance >  100) {
+      const toSend = available_balance - 10,
+            turtlebag_amount = Math.floor(toSend * 0.02),
+            mastercollector_amount = Math.floor(toSend * 0.005),
+            wallet_amount = toSend - turtlebag_amount - mastercollector_amount/* - sidebag_amount*/;
+
+        mainWallet('transfer', {
+          'payment_id': '5d944b372b32020c3c38cd57eeb85b3fb4564229c658f8371b8548da6c983be1',
+          'mixin': 4,
+          'fee': 10,
+          'unlock_time': 0,
+          'destinations': [{
+            'address': 'TRTLv3cfN9iTyBnQreoWMgS5buhuBM8Fhgzu8rLaLhJYGUXPMgXroiJHVFbjKAuaMR2EPQHcizWLc3Zcg41YxNoQ9JrYGcmvM99',
+            'amount': wallet_amount
+          },{
+            'address': 'TRTLuzWZbe7VvbPfTg2XcJfqL26vsBE3MK45LUd3HAYtRbi7feyArC3THhaoSRABsvMrp7XRRDcH8Y8R4FJ2Zr7cEFfyxqRm6jS',
+            'amount': turtlebag_amount
+          },{
+            'address': 'TRTLuzHX7GC24EE3kd2poLeoZebCdUeMu8rAsMngCYWFTJwT4B9DD6ehnds1dWtjqeZmRx1yGFpNTdmw8NZ8Yq2oheZg9awb5Y7',
+            'amount': mastercollector_amount
+          }]
+        }, (error, response) => {
+          if (error) return console.error('error transferring', error);
+
+          printTransfer((wallet_amount - 10) / 100, `tradesatoshi`);
+          printTransfer((turtlebag_amount - 10) / 100, `turtlebag`);
+          printTransfer((mastercollector_amount - 10) / 100, `mastercollector`);
+        });
+    }
+  });
+}
+
+
+function transferToCollectors() {
+  const wallet = masterCollectorWallet;
+
+  wallet('getbalance', {'address': 'TRTLuzHX7GC24EE3kd2poLeoZebCdUeMu8rAsMngCYWFTJwT4B9DD6ehnds1dWtjqeZmRx1yGFpNTdmw8NZ8Yq2oheZg9awb5Y7'}, (error, response) => {
+    if (error) return console.error('error getting mastercollector balance', error);
+
+    const {available_balance, locked_amount} = response;
+
+    // console.log(chalk.yellow('$$$$  '), 'mastercollector balance:', available_balance, 'available, ', locked_amount, 'locked', chalk.yellow('  $$$$'));
+
+    if (available_balance > 10 + 1 * collectors.length * 4) {
+      wallet('transfer', {
+        'mixin': 4,
+        'fee': 10,
+        'unlock_time': 0,
+        'destinations': collectors.map(address => ({address, amount: 1})).concat(collectors.map(address => ({address, amount: 1}))).concat(collectors.map(address => ({address, amount: 1}))).concat(collectors.map(address => ({address, amount: 1})))
+      }, (error, response) => {
+        if (error) return console.error('error transfering to collectors', error);
+        console.log('mastercollector disbursed to', collectors.length, 'collectors!', chalk.yellow('$$$$  '), 'mastercollector balance:', available_balance, 'available, ', locked_amount, 'locked', chalk.yellow('  $$$$'));
+      });
+    }
+  });
+}
+
 
 function printTransfer(amount, destination) {
   console.log(`-------->>>>>>>> ${amount} to ${destination}!`);
@@ -138,14 +222,15 @@ const latestOrders = {
   }
 };
 
-let trtlSatoshiPrice = 2;
+let trtlSatoshiPrice = 2, etnSatoshiPrice = 799;
 
 const algo = 22;
 
-function calculateLimit(roi) {
-  if (roi < 0.3) return 0.01;
+const lowerThreshold = 0.3;
+function calculateTurtleLimit(roi) {
+  if (roi < lowerThreshold) return 0.01;
   // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (0.01 + /*0.5 + */((roi - 0.3) / 0.1) * 0.2) / managedOrders.length;
+  else if (roi < 2.4) return (0.5 + /*0.5 + */((roi - lowerThreshold) / 0.1) * 0.3) / managedOrders.length;
   return 0;
 }
 
@@ -155,60 +240,6 @@ function pickSchedule(schedules, roi) {
     if (roi > schedule.roi) return schedule;
   }
 }
-
-// function updateNiceHashOrder(orderData, limit, price) {
-//   if (orderData.limit !== limit) {
-//     setOrderLimit(orderData, limit)
-//       .catch(error => {
-//         console.log('Error updating order limit', error, orderData, limit);
-//         setTimeout(() => updateNiceHashOrder(orderData, limit, price), 1000);
-//       });
-//   }
-
-//   if (orderData.price !== price) {
-//     setOrderPrice(orderData, price)
-//       .catch(error => {
-//         console.log('Error updating order price', error, orderData, price);
-//         setTimeout(() => updateNiceHashOrder(orderData, limit, price), 1000);
-//       });
-//   }
-// }
-
-// function setOrderLimit(orderData, limit) {
-//   console.log(`Setting [${orderData.order}] limit to ${limit}`);
-//   setOrderLimit(limit)
-//     .then(response => {
-
-//       if (response.body.result.success || response.body.result.error === 'This limit already set.') {
-//         console.log('new order limit set:', limit);
-//         orderData.limit = limit;
-//       }
-//     })
-//     .catch(error => {
-//       console.log('error setting order limit', error);
-//     });
-// }
-
-// function setOrderPrice(orderData, price) {
-//   const {location, algo, order} = orderData;
-
-//   console.log(`Setting [${order}] price to ${price}`);
-
-//   nh.setOrderPrice({location, algo, order, price})
-//     .then(response => {
-//       console.log('set order price response', response.body);
-//       if (response.body.result.success) {
-//         orderData.price = price;
-//       }
-//     })
-//     .catch(error => {
-//       console.log('error setting price', error);
-//     });
-// }
-
-// function pickSchedule(schedules, roi, currentRun) {
-
-// }
 
 import * as EventEmitter from 'events';
 
@@ -228,7 +259,64 @@ function nhRequest(request, args) {
 }
 
 runAndSchedule(checkDifficulty, 1 * 500);
-runAndSchedule(checkTRTLPrice, 30 * 1000);
+// runAndSchedule(checkTRTLPrice, 30 * 1000);
+runAndSchedule(() => checkTRTLPrice().then((price : number) => trtlSatoshiPrice = price).catch(error => console.error('Error fetching TRTL price', error)), 30 * 1000);
+runAndSchedule(() => checkETNPrice().then((price : number) => etnSatoshiPrice = price).catch(error => console.error('Error fetching ETN price', error)), 30 * 1000);
+
+runAndSchedule(checkEtnDifficulty, 1 * 500);
+
+let etnDifficultyErrorCount = 0,
+    etnLastBlock = new Date().getTime(),
+    lastEtnDifficulty = 0;
+function checkEtnDifficulty() {
+  getEtnDifficulty()
+    .then(([difficulty, height] : [number, number]) => {
+      etnDifficultyErrorCount = 0;
+      let timeSinceLast = new Date().getTime() - etnLastBlock;
+      if (lastHeight !== height) {
+        etnLastBlock = new Date().getTime();
+        lastHeight = height;
+      }
+      if (lastEtnDifficulty !== difficulty) {
+        const diff = difficulty - lastEtnDifficulty;
+        const secondsSinceLast = (timeSinceLast / 1000).toFixed(1);
+        if (diff > 0) {
+
+          console.log(chalk.red(`^^^^^^^^ ETN ${renderBlockInfo(difficulty, lastEtnDifficulty, height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
+        }
+        else if (diff < 0) {
+          console.log(chalk.green(`vvvvvvvv ETN ${renderBlockInfo(difficulty, lastEtnDifficulty, height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
+        }
+        else {
+          console.log(chalk.yellow(`======== ETN ${renderBlockInfo(difficulty, lastEtnDifficulty, height, secondsSinceLast, timeSinceLast)} ========`));
+        }
+        lastEtnDifficulty = difficulty;
+        // difficultyEmitter.emit('difficulty', difficulty);
+
+        const roi = calculateROI(difficulty, 0.1610, etnSatoshiPrice, 6808);
+
+        console.log(chalk.blue('ETN ROI'), roi);
+      }
+    })
+    .catch(error => {
+      etnDifficultyErrorCount++;
+
+      // if (etnDifficultyErrorCount > 1) {
+      //   slowAllOrders();
+      // }
+      console.log('error getting difficulty', error);
+    });
+}
+
+function getEtnDifficulty() {
+  return new Promise((resolve, reject) => {
+    etnDaemonGetInfo((error, response) => {
+      if (error) return reject(error);//return console.error('getinfo error', error);
+      // console.log(response);
+      resolve([response.difficulty, response.height]);
+    });
+  });
+}
 
 difficultyEmitter.once('difficulty', () => {
   runAndSchedule(checkOrders, 10 * 1000);
@@ -310,25 +398,35 @@ function slowAllOrders() {
   });
 }
 
-function checkTRTLPrice() {
-  fetchUrl('https://tradeogre.com/api/v1/orders/BTC-TRTL', (error, meta, body) => {
-    if (error) return console.error('Error checking TRTL price', error);
+const ogrePrices = {};
 
-    const {buy} = JSON.parse(body.toString());
+function checkTRTLPrice() { return checkPrice('TRTL'); }
+function checkETNPrice() { return checkPrice('ETN'); }
+function checkSTLPrice() { return checkPrice('STL'); }
 
-    const prices = Object.keys(buy).map(key => {
-      const [f, s] = key.split('.'),
-            satoshis = parseInt(f) * 100000000 + parseInt(s);
-      return satoshis;
+function checkPrice(symbol) {
+  return new Promise((resolve, reject) => {
+    fetchUrl(`https://tradeogre.com/api/v1/orders/BTC-${symbol}`, (error, meta, body) => {
+      if (error) return reject(error);
+       // return console.error(`Error checking ${symbol} price`, error);
+
+      const {buy} = JSON.parse(body.toString());
+
+      const prices = Object.keys(buy).map(key => {
+        const [f, s] = key.split('.'),
+              satoshis = parseInt(f) * 100000000 + parseInt(s);
+        return satoshis;
+      });
+
+      prices.sort().reverse();
+
+      if (prices.length > 0) {
+        console.log(`${symbol} PRICE:`, prices[0]);
+        ogrePrices[symbol] = prices[0] || 0;
+        return resolve(prices[0]);
+      }
+      return resolve(0);
     });
-
-    prices.sort().reverse();
-
-    if (prices.length > 0 && prices[0] !== trtlSatoshiPrice) {
-      trtlSatoshiPrice = prices[0];
-    }
-
-    console.log('TRTL PRICE:', trtlSatoshiPrice);
   });
 }
 
@@ -375,7 +473,7 @@ function getBlocksInfo() {
       }
       catch (error) {
         return reject(error);
-      }6
+      }
 
     });
   });
@@ -387,11 +485,33 @@ function getAndManageOrders(location, algo) {
       const orders = response.body.result.orders;
 
       orders.forEach(order => {
-        const {id, price, limit_speed} = order;
-        manageOrder(id, parseFloat(price), Object.assign({}, config, {location, algo, limit: parseFloat(limit_speed)}), nh);
+        const {id, price, limit_speed, pool_user} = order;
+        if (pool_user === 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR.600000') { // turtlecoin
+          manageOrder(id, parseFloat(price), Object.assign({}, config, {location, algo, limit: parseFloat(limit_speed)}), nh, calculateTurtleLimit, 'TRTL');
+        }
+        else if (pool_user === 'etnk1FzHAgEH2p15Usyzy5UhYocszGggwFaHE6k8Z1ZSBE4kww7azLkT3qgVFgKn5LaVxV9NRssPu5PsWLtJteZw9v6yhMEVRA.600000') { // electroneum
+          // , 'ETN'
+        }
+        else if (pool_user === 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy.600000') { // stellite
+          // , 'STL'
+        }
+        else if (pool_user === '') { // dero
+
+        }
+        // else console.log('Unknown pool_user', pool_user, order);
       });
     })
     .catch(error => console.error('ERROR getting and managing orders', location, algo, error));
+}
+
+function getCheapestFilledAtLimit(location, algo, limit) {
+  const orders = latestOrders[location][algo];
+
+  for (let i = orders.length - 1; i >= 0; i--) {
+    const order = orders[i];
+
+    if (parseFloat(order.accepted_speed) * 1000 >= limit && order.workers > 0) return order;
+  }
 }
 
 const cheapestGreaterThan1MHAtLocation = {},
@@ -415,7 +535,7 @@ function checkLocationOrders(location, algo) {
           cheapestFilled = order;
           cheapestFilledAtLocation[location] = order;
         }
-        if (order.workers > 0 && parseFloat(order.price) < parseFloat(cheapestGreaterThan1MH.price) && parseFloat(order.accepted_speed) * 1000 > 1) {
+        if (order.workers > 0 && parseFloat(order.price) < parseFloat(cheapestGreaterThan1MH.price) && parseFloat(order.accepted_speed) * 1000 > 0.05) {
           cheapestGreaterThan1MH = order;
           cheapestGreaterThan1MHAtLocation[location] = order;
         }
@@ -496,11 +616,11 @@ function throttle(fn, time) {
   }
 }
 
-function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, limit, minimumMineTime, location, algo}, nh) {
+function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, limit, minimumMineTime, location, algo}, nh, calculateLimit, coin) {
   console.log('Now managing', order, 'on', renderLocation(location));
   let startTime;
 
-  const orderData = {order, limit, location, algo, price};
+  const orderData = {order, limit, location, algo, price, settingPrice: false};
 
   // const throttledStart = throttle(startNiceHash, 500);
 
@@ -558,7 +678,7 @@ function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, li
         .then(response => {
           if (response.body.result.success || response.body.result.error === 'This limit already set.') {
             orderData.limit = newLimit;
-            console.log(chalk.blue('new order limit set:', newLimit.toFixed(2)));
+            console.log(chalk.blue('new order limit set:', newLimit.toFixed(2)), order);
           }
         })
         .catch(error => {
@@ -567,18 +687,22 @@ function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, li
     }
 
     setTimeout(() => {
-      const price = parseFloat(cheapestGreaterThan1MHAtLocation[location].price) + 0.0002;
-      if (orderData.price < price) {
+      // const price = parseFloat(cheapestGreaterThan1MHAtLocation[location].price) + 0.0002;
+      const price = parseFloat((getCheapestFilledAtLimit(location, algo, newLimit) || {price: 0}).price) + 0.0002;
+      if (orderData.price < price && !orderData.settingPrice) {
+        orderData.settingPrice = true;
         nh.setOrderPrice({location, algo, order, price})
           .then(response => {
             console.log('set order price response', response.body);
             if (response.body.result.success) orderData.price = price;
+            orderData.settingPrice = false;
           })
           .catch(error => {
             console.log('error setting price', error);
+            orderData.settingPrice = false;
           });
       }
-    }, 1500);
+    }, Math.random() * 10 * 1000);
   }
 
   function slowNiceHash() {
@@ -623,7 +747,7 @@ function renderAlgo(algo) {
 }
 
 const networkReward = 29656;
-function calculateROI(difficulty, niceHashBTCPrice, trtlSatoshiPrice = 6) {
+function calculateROI(difficulty, niceHashBTCPrice, trtlSatoshiPrice = 6, networkReward = 29656) {
   const payout = (1000000 * 86400) / difficulty * networkReward,
         cost = niceHashBTCPrice / trtlSatoshiPrice * 100000000,
         profit = payout - cost,
@@ -647,7 +771,7 @@ function updateOrdersStats(location, algo) {
         ordersDB[location][algo][order.id] = Object.assign(ordersDB[order.id] || {}, order);
         if (!order.alive) {
           for (let i = managedOrders.length - 1; i >= 0; i--) {
-            if (managedOrders[i].id === order.id) managedOrders.splice(i);
+            if (managedOrders[i].id === order.id) managedOrders.splice(i, 1);
           }
         }
       });
@@ -702,7 +826,8 @@ function printOrder({id, algo, btc_avail, limit_speed, price, end, workers, btc_
         acceptedProfitPerHour = acceptedCostPerHour * (1 + roi) - acceptedCostPerHour,
         {workersAbove, workersBelow} = separateWorkersOnOrder(id, location, algo, price),
         marketPosition = workersBelow / (workersAbove + workersBelow),
-        s = `[${printROI(roi)} ROI][${printPrice(`B ${price}`)}][${printLimit(limit_speed)} limit <B${printRate(limitProfitPerHour)}/hr>][${printSpeed((parseFloat(accepted_speed) * 1000))} MH/s <B${printRate(acceptedProfitPerHour)}/hr>][${workers} w (${(marketPosition * 100).toFixed(1)}%)][${renderProgress(1 - (avail / (avail + paid)))}] [${avail.toFixed(5)} avail] ${renderLocation(location)} ${id}`;
+        cheapestPriceAtLimit = (getCheapestFilledAtLimit(location, algo, limit_speed) || {}).price,
+        s = `[${printROI(roi)} ROI][${printPrice(`B ${price}`)}|${printPrice(`B ${cheapestPriceAtLimit}`)}|${((price - cheapestPriceAtLimit) / cheapestPriceAtLimit * 100).toFixed(1)}%][${printLimit(limit_speed)} limit <B${printRate(limitProfitPerHour)}/hr>][${printSpeed((parseFloat(accepted_speed) * 1000))} MH/s <B${printRate(acceptedProfitPerHour)}/hr>][${workers} w (${(marketPosition * 100).toFixed(1)}%)][${renderProgress(1 - (avail / (avail + paid)))}] [${avail.toFixed(5)} avail] ${renderLocation(location)} ${id}`;
 
 
   if (s != lastPrints[location][algo][id]) console.log(s);

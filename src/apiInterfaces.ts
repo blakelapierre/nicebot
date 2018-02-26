@@ -24,6 +24,7 @@ function jsonHttpRequest(host, port, data, callback, path = undefined){
         });
         res.on('end', function(){
             var replyJson;
+            // console.log({replyData});
             try{
                 replyJson = JSON.parse(replyData);
             }
