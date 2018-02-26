@@ -203,16 +203,19 @@ const config = {
         ]
       };
 
-const ordersDB = {
-  '0': {
-    22: {}
-  },
-  '1': {
-    22: {}
-  }
-};
+const ordersDB = ['TRTL', 'ETN', 'STL', 'unknown'].reduce((db, coin) => (db[coin] = {'0': {22: []}, '1': {22: []}}, db), {});
 
-const managedOrders = [];
+// const ordersDB = {
+//   '0': {
+//     22: {}
+//   },
+//   '1': {
+//     22: {}
+//   }
+// };
+
+// const managedOrders = [];
+const managedOrders = {'TRTL': [], 'ETN': {}, 'STL': []};
 const latestOrders = {
   '0': {
     22: []
@@ -230,7 +233,7 @@ const lowerThreshold = 0.3;
 function calculateTurtleLimit(roi) {
   if (roi < lowerThreshold) return 0.01;
   // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (0.5 + /*0.5 + */((roi - lowerThreshold) / 0.1) * 0.3) / managedOrders.length;
+  else if (roi < 2.4) return (0.5 + /*0.5 + */((roi - lowerThreshold) / 0.1) * 0.3) / managedOrders['TRTL'].length;
   return 0;
 }
 
@@ -249,7 +252,11 @@ import {fetchUrl} from 'fetch';
 
 const nh = new nicehash({apiId, apiKey});
 
-const difficultyEmitter = new EventEmitter(),
+const difficultyEmitters = {
+        'TRTL': new EventEmitter(),
+        'ETN': new EventEmitter(),
+        'STL': new EventEmitter()
+      },
       cheapestEmitter = new EventEmitter();
 
 function nhRequest(request, args) {
@@ -258,12 +265,12 @@ function nhRequest(request, args) {
   });
 }
 
-runAndSchedule(checkDifficulty, 1 * 500);
+runAndSchedule(checkTRTLDifficulty, 1 * 500);
+runAndSchedule(checkEtnDifficulty, 1 * 500);
 // runAndSchedule(checkTRTLPrice, 30 * 1000);
 runAndSchedule(() => checkTRTLPrice().then((price : number) => trtlSatoshiPrice = price).catch(error => console.error('Error fetching TRTL price', error)), 30 * 1000);
 runAndSchedule(() => checkETNPrice().then((price : number) => etnSatoshiPrice = price).catch(error => console.error('Error fetching ETN price', error)), 30 * 1000);
 
-runAndSchedule(checkEtnDifficulty, 1 * 500);
 
 let etnDifficultyErrorCount = 0,
     etnLastBlock = new Date().getTime(),
@@ -273,9 +280,9 @@ function checkEtnDifficulty() {
     .then(([difficulty, height] : [number, number]) => {
       etnDifficultyErrorCount = 0;
       let timeSinceLast = new Date().getTime() - etnLastBlock;
-      if (lastHeight !== height) {
+      if (lastHeights['ETN'] !== height) {
         etnLastBlock = new Date().getTime();
-        lastHeight = height;
+        lastHeights['ETN'] = height;
       }
       if (lastEtnDifficulty !== difficulty) {
         const diff = difficulty - lastEtnDifficulty;
@@ -291,7 +298,7 @@ function checkEtnDifficulty() {
           console.log(chalk.yellow(`======== ETN ${renderBlockInfo(difficulty, lastEtnDifficulty, height, secondsSinceLast, timeSinceLast)} ========`));
         }
         lastEtnDifficulty = difficulty;
-        // difficultyEmitter.emit('difficulty', difficulty);
+        // difficultyEmitters['TRTL'].emit('difficulty', difficulty);
 
         const roi = calculateROI(difficulty, 0.1610, etnSatoshiPrice, 6808);
 
@@ -318,7 +325,7 @@ function getEtnDifficulty() {
   });
 }
 
-difficultyEmitter.once('difficulty', () => {
+difficultyEmitters['TRTL'].once('difficulty', () => {
   runAndSchedule(checkOrders, 10 * 1000);
   // runAndSchedule(projectDifficulty, 10 * 1000);
 
@@ -329,44 +336,68 @@ difficultyEmitter.once('difficulty', () => {
   getAndManageOrders(1, 22);
 });
 
-difficultyEmitter.on('difficulty', () => {
+difficultyEmitters['TRTL'].on('difficulty', () => {
   printOrders(0, algo);
   printOrders(1, algo);
 });
 
 
-let difficultyErrorCount = 0,
+const difficultiesErrorCount = {
+  'TRTL': 0,
+  'ETN': 0,
+  'STL': 0
+};
+
+const lastDifficulties = {
+  'TRTL': undefined,
+  'ETN': undefined,
+  'STL': undefined
+};
+
+const lastBlocks = {
+  'TRTL': 0,
+  'ETN': 0,
+  'STL': 0
+};
+
+const lastHeights = {
+  'TRTL': 0,
+  'ETN': 0,
+  'STL': 0
+};
+
+let /*difficultyErrorCount = 0,*/
     lastBlock = new Date().getTime();
-function checkDifficulty() {
+function checkTRTLDifficulty() {
   getDifficulty()
     .then(([difficulty, height] : [number, number]) => {
-      difficultyErrorCount = 0;
-      let timeSinceLast = new Date().getTime() - lastBlock;
-      if (lastHeight !== height) {
-        lastBlock = new Date().getTime();
-        lastHeight = height;
+      difficultiesErrorCount['TRTL'] = 0;
+      let timeSinceLast = new Date().getTime() - lastBlocks['TRTL'];
+      if (lastHeights['TRTL'] !== height) {
+        lastBlocks['TRTL'] = new Date().getTime();
+        lastHeights['TRTL'] = height;
       }
-      if (lastDifficulty !== difficulty) {
-        const diff = difficulty - lastDifficulty;
+      if (lastDifficulties['TRTL'] !== difficulty) {
+        const diff = difficulty - lastDifficulties['TRTL'];
         const secondsSinceLast = (timeSinceLast / 1000).toFixed(1);
         if (diff > 0) {
 
-          console.log(chalk.red(`^^^^^^^^ ${renderBlockInfo(difficulty, lastDifficulty, height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
+          console.log(chalk.red(`^^^^^^^^ ${renderBlockInfo(difficulty, lastDifficulties['TRTL'], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
         }
         else if (diff < 0) {
-          console.log(chalk.green(`vvvvvvvv ${renderBlockInfo(difficulty, lastDifficulty, height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
+          console.log(chalk.green(`vvvvvvvv ${renderBlockInfo(difficulty, lastDifficulties['TRTL'], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
         }
         else {
-          console.log(chalk.yellow(`======== ${renderBlockInfo(difficulty, lastDifficulty, height, secondsSinceLast, timeSinceLast)} ========`));
+          console.log(chalk.yellow(`======== ${renderBlockInfo(difficulty, lastDifficulties['TRTL'], height, secondsSinceLast, timeSinceLast)} ========`));
         }
-        lastDifficulty = difficulty;
-        difficultyEmitter.emit('difficulty', difficulty);
+        lastDifficulties['TRTL'] = difficulty;
+        difficultyEmitters['TRTL'].emit('difficulty', difficulty);
       }
     })
     .catch(error => {
-      difficultyErrorCount++;
+      difficultiesErrorCount['TRTL']++;
 
-      if (difficultyErrorCount > 1) {
+      if (difficultiesErrorCount['TRTL'] > 1) {
         slowAllOrders();
       }
       console.log('error getting difficulty', error);
@@ -381,8 +412,8 @@ function renderBlockTime(time) {
 }
 
 function slowAllOrders() {
-  console.log('************* SLOWING ALL ORDERS!', managedOrders);
-  managedOrders.forEach(({order, location, algo}) => {
+  console.log('************* SLOWING ALL ORDERS!', managedOrders['TRTL']);
+  managedOrders['TRTL'].forEach(({order, location, algo}) => {
     return nh.setOrderLimit({
       order,
       location,
@@ -563,7 +594,7 @@ function printOrdersSummary(location, algo, orders = []) {
   const cheapestFilled = cheapestFilledAtLocation[location],
         cheapestGreaterThan1MH = cheapestGreaterThan1MHAtLocation[location];
 
-  const s = `[Cheapest > 1MH/s: ${printPrice(cheapestGreaterThan1MH.price)} (${(parseFloat(cheapestGreaterThan1MH.accepted_speed) * 1000).toFixed(2)} MH/s)] [${renderLocation(location)}] [${printROI(calculateROI(lastDifficulty, parseFloat(cheapestGreaterThan1MH.price) + 0.0001, trtlSatoshiPrice))} ROI] ${renderAlgo(algo)} [${orders.length} orders] (${total_speed.toFixed(2)} MH/s)`;
+  const s = `[Cheapest > 1MH/s: ${printPrice(cheapestGreaterThan1MH.price)} (${(parseFloat(cheapestGreaterThan1MH.accepted_speed) * 1000).toFixed(2)} MH/s)] [${renderLocation(location)}] [${printROI(calculateROI(lastDifficulties['TRTL'], parseFloat(cheapestGreaterThan1MH.price) + 0.0001, trtlSatoshiPrice))} ROI] ${renderAlgo(algo)} [${orders.length} orders] (${total_speed.toFixed(2)} MH/s)`;
 
   if (s != summaryPrints[location][algo]) console.log(s);
   summaryPrints[location][algo] = s;
@@ -573,25 +604,6 @@ function checkOrders() {
   checkLocationOrders(0, algo);
   checkLocationOrders(1, algo);
 }
-
-let lastDifficulty = 500000000,
-    lastHeight = 0;
-// function checkDifficulty(start, stop) {
-//   getDifficulty()
-//     .then((difficulty : number) => {
-//       console.log('Current difficulty:', difficulty);
-
-//       if (difficulty < threshold) {
-//         start(difficulty);
-//       }
-//       else {
-//         stop();
-//       }
-//     })
-//     .catch(error => {
-//       console.error('Error getting difficulty', error);
-//     });
-// }
 
 function getDifficulty() {
   return new Promise((resolve, reject) => {
@@ -620,20 +632,20 @@ function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, li
   console.log('Now managing', order, 'on', renderLocation(location));
   let startTime;
 
-  const orderData = {order, limit, location, algo, price, settingPrice: false};
+  const orderData = {order, limit, location, algo, price, coin, settingPrice: false, settingLimit: false};
 
   // const throttledStart = throttle(startNiceHash, 500);
 
-  managedOrders.push(orderData);
+  managedOrders[coin].push(orderData);
 
-  difficultyEmitter.on('difficulty', difficulty => {
+  difficultyEmitters['TRTL'].on('difficulty', difficulty => {
     checkROIWithDifficulty(difficulty, startNiceHash, slowNiceHash);
-    printOrders(0, 22);
-    printOrders(1, 22);
+    printOrders(0, algo);
+    printOrders(1, algo);
   });
-  cheapestEmitter.on('updated', () => checkROIWithDifficulty(lastDifficulty, startNiceHash, slowNiceHash));
+  cheapestEmitter.on('updated', () => checkROIWithDifficulty(lastDifficulties[coin], startNiceHash, slowNiceHash));
 
-  checkROIWithDifficulty(lastDifficulty, startNiceHash, slowNiceHash);
+  checkROIWithDifficulty(lastDifficulties[coin], startNiceHash, slowNiceHash);
 
   // runAndSchedule(checkAndRunROI, 4 * 1000);
   // setTimeout(() => runAndSchedule(priceReducer, (10 * 60 + 1) * 1000), 5000);
@@ -671,17 +683,20 @@ function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, li
 
     const newLimit = calculateLimit(roi);
 
-    if (newLimit !== orderData.limit) {
+    if (newLimit !== orderData.limit && !orderData.settingLimit) {
+      orderData.settingLimit = true;
       // console.log('starting', orderData.order, newLimit.toFixed(2));
 
       setOrderLimit(newLimit)
         .then(response => {
+          orderData.settingLimit = false;
           if (response.body.result.success || response.body.result.error === 'This limit already set.') {
             orderData.limit = newLimit;
             console.log(chalk.blue('new order limit set:', newLimit.toFixed(2)), order);
           }
         })
         .catch(error => {
+          orderData.settingLimit = false;
           console.log('error setting order limit', error, limit);
         });
     }
@@ -768,43 +783,54 @@ function updateOrdersStats(location, algo) {
 
       orders.forEach(order => {
         order.location = location;
-        ordersDB[location][algo][order.id] = Object.assign(ordersDB[order.id] || {}, order);
-        if (!order.alive) {
-          for (let i = managedOrders.length - 1; i >= 0; i--) {
-            if (managedOrders[i].id === order.id) managedOrders.splice(i, 1);
-          }
-        }
+        order.coin = getCoin(order.pool_user);
+        ordersDB[order.coin || 'unknown'][location][algo][order.id] = Object.assign(ordersDB[order.coin][order.id] || {}, order);
+        // if (!order.alive) {
+        //   for (let i = managedOrders.length - 1; i >= 0; i--) {
+        //     if (managedOrders[i].id === order.id) managedOrders.splice(i, 1);
+        //   }
+        // }
       });
       printOrders(location, algo);
     })
     .catch(error => console.log('Error updating order stats', error));
 }
 
+function getCoin(pool_user) {
+  switch (pool_user) {
+    case 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR.600000': return 'TRTL';
+    case 'etnk1FzHAgEH2p15Usyzy5UhYocszGggwFaHE6k8Z1ZSBE4kww7azLkT3qgVFgKn5LaVxV9NRssPu5PsWLtJteZw9v6yhMEVRA.600000': return 'ETN';
+    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy.600000': return 'STL';
+  }
+  return 'unknown';
+}
+
 let lastBTCAvail = 0;
 
 function printOrders(location, algo) {
-  Object.values(ordersDB[location][algo]).forEach(printOrder);
+  Object.values(ordersDB).forEach(coinDB => coinDB[location][algo].forEach(printOrder));
 
-  if (Object.values(ordersDB).length > 1) {
-    let btc_avail = 0, orders = 0, avails = [];
-    Object
-      .values(ordersDB)
-      .forEach(location =>
-        Object
-          .values(location)
-          .forEach(algo =>
-            Object
-              .values(algo)
-              .forEach(order => {
-                const [big, little] = order['btc_avail'].split('.');
-                btc_avail += parseInt(little.padEnd(8, '0')) + parseInt(big) * 100000000;
-                avails.push([parseInt(big), parseInt(little.padEnd(8, '0'))]);
-                orders++;
-              })));
+  let btc_avail = 0, orders = 0, avails = [];
+  Object
+    .values(ordersDB)
+    .forEach(coinDB =>
+      Object
+        .values(coinDB)
+        .forEach(location =>
+          Object
+            .values(location)
+            .forEach(algo =>
+              Object
+                .values(algo)
+                .forEach(order => {
+                  const [big, little] = order['btc_avail'].split('.');
+                  btc_avail += parseInt(little.padEnd(8, '0')) + parseInt(big) * 100000000;
+                  avails.push([parseInt(big), parseInt(little.padEnd(8, '0'))]);
+                  orders++;
+                }))));
 
     if (lastBTCAvail !== btc_avail) console.log('BTC AVAIL:', btc_avail / 100000000, 'from', orders, 'orders');
     lastBTCAvail = btc_avail;
-  }
 }
 
 const lastPrints = {
@@ -816,10 +842,10 @@ const lastPrints = {
   }
 };
 
-function printOrder({id, algo, btc_avail, limit_speed, price, end, workers, btc_paid, location, accepted_speed}) {
+function printOrder({id, coin, algo, btc_avail, limit_speed, price, end, workers, btc_paid, location, accepted_speed}) {
   const avail = parseFloat(btc_avail),
         paid = parseFloat(btc_paid),
-        roi = calculateROI(lastDifficulty, price, trtlSatoshiPrice),
+        roi = calculateROI(lastDifficulties['TRTL'], price, trtlSatoshiPrice),
         limitCostPerHour = limit_speed * price / 24,
         limitProfitPerHour = limitCostPerHour * (1 + roi) - limitCostPerHour,
         acceptedCostPerHour = (parseFloat(accepted_speed) * 1000) * price / 24,
@@ -827,7 +853,7 @@ function printOrder({id, algo, btc_avail, limit_speed, price, end, workers, btc_
         {workersAbove, workersBelow} = separateWorkersOnOrder(id, location, algo, price),
         marketPosition = workersBelow / (workersAbove + workersBelow),
         cheapestPriceAtLimit = (getCheapestFilledAtLimit(location, algo, limit_speed) || {}).price,
-        s = `[${printROI(roi)} ROI][${printPrice(`B ${price}`)}|${printPrice(`B ${cheapestPriceAtLimit}`)}|${((price - cheapestPriceAtLimit) / cheapestPriceAtLimit * 100).toFixed(1)}%][${printLimit(limit_speed)} limit <B${printRate(limitProfitPerHour)}/hr>][${printSpeed((parseFloat(accepted_speed) * 1000))} MH/s <B${printRate(acceptedProfitPerHour)}/hr>][${workers} w (${(marketPosition * 100).toFixed(1)}%)][${renderProgress(1 - (avail / (avail + paid)))}] [${avail.toFixed(5)} avail] ${renderLocation(location)} ${id}`;
+        s = `[${printROI(roi)} ROI](${coin})[${printPrice(`B ${price}`)}|${printPrice(`B ${cheapestPriceAtLimit}`)}|${((price - cheapestPriceAtLimit) / cheapestPriceAtLimit * 100).toFixed(1)}%][${printLimit(limit_speed)} limit <B${printRate(limitProfitPerHour)}/hr>][${printSpeed((parseFloat(accepted_speed) * 1000))} MH/s <B${printRate(acceptedProfitPerHour)}/hr>][${workers} w (${(marketPosition * 100).toFixed(1)}%)][${renderProgress(1 - (avail / (avail + paid)))}] [${avail.toFixed(5)} avail] ${renderLocation(location)} ${id}`;
 
 
   if (s != lastPrints[location][algo][id]) console.log(s);
