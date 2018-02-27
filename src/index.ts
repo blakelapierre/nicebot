@@ -75,6 +75,22 @@ const exchanges = {
   'tradeogre': {coins: ['TRTL', 'ETN', 'STL', 'BTC']}
 };
 
+const exchangePrices = {
+  'tradeogre': {},
+  'cryptopia': {},
+  'stocks.exchange': {}
+};
+
+const coinStatus = {
+  'TRTL': {selling: true},
+  'ETN': {selling: true},
+  'STL': {selling: true},
+  'DER': {selling: false},
+  'MSR': {selling: false},
+  'ITNS': {selling: false},
+  'BTC': {selling: false}
+};
+
 const managedOrders = {'TRTL': [], 'ETN': [], 'STL': [], 'DER': [], 'MSR': [], 'ITNS': []};
 
 
@@ -106,8 +122,47 @@ runAndSchedule(checkTradeOgreBalances, 60 * 1000);
 function checkTradeOgreBalances() {
   exchanges['tradeogre'].coins.forEach(coin => {
     getTradeOgreBalance(coin)
-      .then(({balance, available}) => console.log(`tradeogre ${printCoin(coin)} balance ${balance}, available ${available}`))
+      .then(({balance, available}) => {
+        console.log(`${chalk.blue('tradeogre')} ${printCoin(coin)} balance ${balance}, available ${parseFloat(available) > 0 ? chalk.yellow(available) : available}`);
+
+        if (coinStatus[coin].selling) {
+          if (parseFloat(available) * exchangePrices['tradeogre'][coin] >= 10000) {
+            submitTradeOgreSellOrder(`BTC-${coin}`, available, `0.${exchangePrices['tradeogre'][coin].toString().padStart(8, '0')}`)
+              .then(response => console.log(`tradeogre sell result ${coin} ${JSON.stringify(response)}`))
+              .catch(error => console.error(`error selling ${available} ${coin} on tradeogre`, error))
+          }
+        }
+      })
       .catch(error => console.error(`Error getting tradeogre ${printCoin(coin)} balance`, error));
+  });
+}
+
+function submitTradeOgreSellOrder(market, quantity, price) {
+  return new Promise((resolve, reject) => {
+    const body = querystring.stringify({market, quantity, price}),
+          authKey = new Buffer(`${TO_PUBLIC}:${TO_PRIVATE}`).toString('base64');
+
+    const request = https.request({
+      host: 'tradeogre.com',
+      port: 443,
+      method: 'POST',
+      path: '/api/v1/order/sell',
+      headers: {
+        'Authorization': `Basic ${authKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': body.length
+      }
+    }, response => {
+      let result = '';
+      response.on('data', chunk => result += chunk);
+      response.on('end', () => resolve(JSON.parse(result)));
+      response.on('error', reject);
+    });
+
+    request.on('error', reject);
+
+    request.write(body);
+    request.end();
   });
 }
 
@@ -604,13 +659,6 @@ function slowAllOrders() {
   });
 }
 
-const ogrePrices = {};
-
-const exchangePrices = {
-  'tradeogre': {},
-  'cryptopia': {},
-  'stocks.exchange': {}
-};
 
 function checkTRTLPrice() { return checkTradeOgrePrice('TRTL').catch(error => console.error('Error fetching TRTL price', error)); }
 function checkETNPrice() { return checkTradeOgrePrice('ETN').catch(error => console.error('Error fetching ETN price', error)); }
@@ -649,7 +697,6 @@ function checkTradeOgrePrice(symbol) {
 
       if (prices.length > 0) {
         console.log(`${printCoin(symbol)} PRICE [tradeogre]:`, chalk.yellow((prices[0] || 0).toString()));
-        ogrePrices[symbol] = prices[0] || 0;
         exchangePrices['tradeogre'][symbol] = prices[0] || 0;
         return resolve(prices[0]);
       }
@@ -1137,6 +1184,25 @@ function renderProgress(progress) {
   return chalk.green(ret);
 
   // return ret;
+}
+
+// https://github.com/uxitten/polyfill/blob/master/string.polyfill.js
+// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/padStart
+if (!String.prototype.padStart) {
+    String.prototype.padStart = function padStart(targetLength,padString) {
+        targetLength = targetLength>>0; //truncate if number or convert non-number to 0;
+        padString = String((typeof padString !== 'undefined' ? padString : ' '));
+        if (this.length > targetLength) {
+            return String(this);
+        }
+        else {
+            targetLength = targetLength-this.length;
+            if (targetLength > padString.length) {
+                padString += padString.repeat(targetLength/padString.length); //append to original to ensure we are longer than needed
+            }
+            return padString.slice(0,targetLength) + String(this);
+        }
+    };
 }
 
 // https://github.com/uxitten/polyfill/blob/master/string.polyfill.js
