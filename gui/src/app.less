@@ -26,8 +26,15 @@ side-by-side {
     algorithm {
       orders {
         display: block;
+
         order {
           display: block;
+
+          background-color: #888;
+
+          &.my-order {
+              border: solid 1px #f00;
+          }
 
           speed-bar {
             position: relative;
@@ -44,7 +51,11 @@ side-by-side {
             }
 
             full-speed {
+              position: absolute;
+              display: inline-block;
 
+              height: 100%;
+              width: 100%;
             }
 
             unlimited-speed {

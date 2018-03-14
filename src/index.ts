@@ -89,7 +89,7 @@ const etnLowerThreshold = 0.2;
 function calculateETNLimit(roi) {
   if (roi < etnLowerThreshold) return 0.01;
   // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (2 + /*0.5 + */((roi - etnLowerThreshold) / 0.1) * 0.5) / managedOrders['ETN'].filter(({coin, location, algo, order}) => ordersDB[coin][location][algo][order].workers > 0).length;
+  else if (roi < 2.4) return (12 + /*0.5 + */((roi - etnLowerThreshold) / 0.1) * 3) / managedOrders['ETN'].filter(({coin, location, algo, order}) => ordersDB[coin][location][algo][order].workers > 0).length;
   return 0;
 }
 
@@ -1124,10 +1124,9 @@ function getCoinFromPoolUser(pool_user) {
 }
 
 function getAndManageOrders(location, algo) {
-  nh.getMyOrders(location, algo)
-    .then(response => {
-      const orders = response.body.result.orders;
-
+  getMyOrders(location, algo)
+  // nh.getMyOrders(location, algo)
+    .then((orders : Array<any>) => {
       orders.forEach(order => {
         const {id, price, limit_speed, pool_user, pool_host} = order,
               coin = getCoinFromPoolUser(pool_user);
@@ -1136,6 +1135,18 @@ function getAndManageOrders(location, algo) {
       });
     })
     .catch(error => console.error('ERROR getting and managing orders', location, algo, error));
+}
+
+function getMyOrders(location, algo) {
+  return new Promise((resolve, reject) => {
+    nh.getMyOrders(location, algo)
+      .then(response => {
+        const orders = response.body.result.orders;
+        broadcast(JSON.stringify(['my_orders', {location, algo, orders}]));
+        resolve(orders);
+      })
+      .catch(reject);
+  });
 }
 
 function getCheapestFilledAtLimit(location, algo, limit) {
@@ -1177,7 +1188,7 @@ function checkLocationOrders(location, algo) {
 
       latestOrders[location][algo] = orders;
 
-      broadcast(JSON.stringify({location, algo, orders}));
+      broadcast(JSON.stringify(['orders', {location, algo, orders}]));
 
       let cheapestFilled = orders[0],
           cheapestGreaterThan1MH = orders[0];
@@ -1470,10 +1481,9 @@ function runAndSchedule(fn, interval) {
 }
 
 function updateOrdersStats(location, algo) {
-  return nhRequest('getMyOrders', [location, algo])
-    .then(response => {
-      const {orders} = response.body.result;
-
+  return getMyOrders(location, algo)
+  // return nhRequest('getMyOrders', [location, algo])
+    .then((orders : Array<any>) => {
       orders.forEach(order => {
         order.location = location;
         order.coin = getCoin(order.pool_user);
