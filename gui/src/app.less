@@ -1,0 +1,96 @@
+body {
+  position: fixed;
+
+  display: flex;
+
+  height: 100%;
+  width: 100%;
+
+  margin: 0;
+  padding: 0;
+
+}
+
+side-by-side {
+  flex: 1 1 auto;
+
+  display: flex;
+
+  justify-content: space-around;
+
+  overflow-y: auto;
+
+  background-color: rgba(0, 0, 0, 0.25);
+
+  location {
+    algorithm {
+      orders {
+        display: block;
+        order {
+          display: block;
+
+          speed-bar {
+            position: relative;
+
+            display: block;
+
+            height: 0.25em;
+            width: 10em;
+
+            background-color: #999;
+
+            &.no-workers {
+              background-color: rgba(0, 0, 0, 1);
+            }
+
+            full-speed {
+
+            }
+
+            unlimited-speed {
+              position: absolute;
+              display: inline-block;
+
+              height: 100%;
+              width: 100%;
+
+              background-color: rgba(128, 128, 255, 0.5);
+            }
+
+            accepted-speed {
+              position: absolute;
+              display: inline-block;
+
+              height: 100%;
+
+              background-color: rgba(0, 255, 0, 0.65);
+
+              transition: width 1s linear;
+            }
+
+            relative-limit {
+              position: absolute;
+              display: inline-block;
+
+              height: 100%;
+              width: 0.15em;
+
+              background-color: rgba(255, 255, 0, 1);
+            }
+
+            workers {
+              position: absolute;
+              display: inline-block;
+
+              height: 100%;
+
+              background-color: rgba(255, 64, 0, 0.95);
+
+              transition: width 1s linear;
+            }
+          }
+        }
+      }
+    }
+  }
+}

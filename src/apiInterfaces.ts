@@ -29,7 +29,7 @@ function jsonHttpRequest(host, port, data, callback, path = undefined){
                 replyJson = JSON.parse(replyData);
             }
             catch(e){
-                callback(e);
+                callback(e, replyData);
                 return;
             }
             callback(null, replyJson);
@@ -54,7 +54,7 @@ function rpc(host, port, method, params, callback){
     });
     jsonHttpRequest(host, port, data, function(error, replyJson){
         if (error){
-            callback(error);
+            callback(error, replyJson);
             return;
         }
         callback(replyJson.error, replyJson.result);

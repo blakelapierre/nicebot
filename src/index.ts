@@ -1,15 +1,18 @@
+import {spawn} from 'child_process';
 import * as querystring from 'querystring';
 import * as EventEmitter from 'events';
 import * as https from 'https';
 
 import * as nicehash from 'nicehash';
 
+import chalk from 'chalk';
+
 import {fetchUrl} from 'fetch';
 
 import {createAPI} from './apiInterfaces';
+import {start} from './server';
 
-import chalk from 'chalk';
-
+const broadcast = start();
 
 const apiId = process.env['API_ID'],
       apiKey = process.env['API_KEY'],
@@ -20,89 +23,221 @@ const nh = new nicehash({apiId, apiKey});
 
 const {rpcWallet: trtlWallet, rpcDaemon, daemonGetInfo} = createAPI({host: '127.0.0.1', port: 11898}, {host: '127.0.0.1', port: 9999});
 const {rpcWallet: masterCollectorWallet} = createAPI({host: '127.0.0.1', port: 11898}, {host: '127.0.0.1', port: 9998});
-const {rpcWallet: stlWallet, rpcDaemon: stlDaemon, daemonGetInfo: stlDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 7777}, {host: '127.0.0.1', port: 7779});
+const {rpcWallet: xtlWallet, rpcDaemon: xtlDaemon, daemonGetInfo: xtlDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 7777}, {host: '127.0.0.1', port: 7779});
 const {rpcWallet: etnWallet, rpcDaemon: etnDaemon, daemonGetInfo: etnDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 8888}, {host: '127.0.0.1', port: 8889});
 const {rpcWallet: msrWallet, rpcDaemon: msrDaemon, daemonGetInfo: msrDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9988}, {host: '127.0.0.1', port: 9989});
+const {rpcWallet: itnsWallet, rpcDaemon: itnsDaemon, daemonGetInfo: itnsDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9978}, {host: '127.0.0.1', port: 9979});
+const {rpcWallet: grftWallet, rpcDaemon: grftDaemon, daemonGetInfo: grftDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9968}, {host: '127.0.0.1', port: 9969});
 
 
-const ordersDB = ['TRTL', 'ETN', 'STL', 'DER', 'MSR', 'ITNS', 'unknown'].reduce((db, coin) => (db[coin] = {'0': {22: []}, '1': {22: []}}, db), {});
+const ordersDB = ['TRTL', 'ETN', 'XTL', 'DER', 'MSR', 'ITNS', 'GRFT', 'unknown'].reduce((db, coin) => (db[coin] = {'0': {22: {}}, '1': {22: {}}}, db), {});
+
+const pools = {
+  'TRTL': [
+    '165.227.80.178',
+    '159.65.77.77',
+    '159.65.63.178',
+    '207.154.195.78',
+    '188.166.26.62',
+    '165.227.43.9'
+  ]
+};
+
+const poolStatus = {
+  '165.227.80.178': undefined,
+  '159.65.77.77': undefined,
+  '159.65.63.178': undefined,
+  '207.154.195.78': undefined,
+  '188.166.26.62': undefined,
+  '165.227.43.9': undefined
+};
+
+const networkRewards = {
+  'TRTL': 29650,
+  'ETN': 6795,
+  'XTL': 18535,
+  'ITNS': 1450,
+  'MSR': 27.24,
+  'GRFT': 1781.52
+};
+
+const limitFn = {
+  'TRTL': calculateTRTLLimit,
+  'ETN': calculateETNLimit,
+  'XTL': calculateXTLLimit,
+  'MSR': calculateMSRLimit,
+  'ITNS': calculateITNSLimit,
+  'GRFT': calculateGRFTLimit
+};
+
+const lowerThreshold = 0.2;
+function calculateTRTLLimit(roi) {
+  if (roi < lowerThreshold) return 0.01;
+  else if (roi < 1.5) return (1 + /*0.5 + */((roi - lowerThreshold) / 0.1) * 0.3) / managedOrders['TRTL'].length;
+  return 0;
+}
+
+const xtlLowerThreshold = 0.2;
+function calculateXTLLimit(roi) {
+  if (roi < xtlLowerThreshold) return 0.01;
+  // else if (roi < 2.4) return roi - 0.1;
+  else if (roi < 1) return (1 + /*0.5 + */((roi - lowerThreshold) / 0.1) * 1) / managedOrders['XTL'].length;
+  return 5;
+}
+
+const etnLowerThreshold = 0.2;
+function calculateETNLimit(roi) {
+  if (roi < etnLowerThreshold) return 0.01;
+  // else if (roi < 2.4) return roi - 0.1;
+  else if (roi < 2.4) return (2 + /*0.5 + */((roi - etnLowerThreshold) / 0.1) * 0.5) / managedOrders['ETN'].filter(({coin, location, algo, order}) => ordersDB[coin][location][algo][order].workers > 0).length;
+  return 0;
+}
+
+const msrLowerThreshold = 0.2;
+function calculateMSRLimit(roi) {
+  if (roi < msrLowerThreshold) return 0.01;
+  // else if (roi < 2.4) return roi - 0.1;
+  else if (roi < 2.4) return (0.5 + /*0.5 + */((roi - msrLowerThreshold) / 0.1) * 0.35) / managedOrders['MSR'].length;
+  return 0;
+}
+
+const itnsLowerThreshold = 0.2;
+function calculateITNSLimit(roi) {
+  if (roi < itnsLowerThreshold) return 0.01;
+  // else if (roi < 2.4) return roi - 0.1;
+  else if (roi < 2.4) return (1 + /*0.5 + */((roi - itnsLowerThreshold) / 0.1) * 3) / managedOrders['ITNS'].length;
+  return 0;
+}
+
+const grftLowerThreshold = 0.2;
+function calculateGRFTLimit(roi) {
+  if (roi < grftLowerThreshold) return 0.01;
+  // else if (roi < 2.4) return roi - 0.1;
+  else if (roi < 2.4) return (10 + /*0.5 + */((roi - grftLowerThreshold) / 0.1) * 3) / managedOrders['ITNS'].length;
+  return 0;
+}
+
+const poolStopFn = {
+  'TRTL': ({roi}) => roi < -0.1,
+  'ETN': ({roi}) => false,
+  'XTL': ({roi}) => false,
+  'MSR': ({roi}) => false,
+  'ITNS': ({roi}) => false,
+  'GRFT': ({roi}) => false
+};
+
+const poolStartFn = {
+  'TRTL': ({roi}) => roi > -0.1,
+  'ETN': ({roi}) => false,
+  'XTL': ({roi}) => false,
+  'MSR': ({roi}) => false,
+  'ITNS': ({roi}) => false,
+  'GRFT': ({roi}) => false
+};
 
 const difficultiesErrorCount = {
   'TRTL': 0,
   'ETN': 0,
-  'STL': 0,
+  'XTL': 0,
   'DER': 0,
   'MSR': 0,
-  'ITNS': 0
+  'ITNS': 0,
+  'GRFT': 0
 };
 
 const lastDifficulties = {
   'TRTL': undefined,
   'ETN': undefined,
-  'STL': undefined,
+  'XTL': undefined,
   'DER': undefined,
   'MSR': undefined,
-  'ITNS': undefined
+  'ITNS': undefined,
+  'GRFT': undefined
 };
 
 const lastBlocks = {
   'TRTL': 0,
   'ETN': 0,
-  'STL': 0,
+  'XTL': 0,
   'DER': 0,
   'MSR': 0,
-  'ITNS': 0
+  'ITNS': 0,
+  'GRFT': 0
 };
 
 const lastHeights = {
   'TRTL': 0,
   'ETN': 0,
-  'STL': 0,
+  'XTL': 0,
   'DER': 0,
   'MSR': 0,
-  'ITNS': 0
+  'ITNS': 0,
+  'GRFT': 0
 };
 
 const currentExchange = {
   'TRTL': 'tradeogre',
   'ETN': 'tradeogre',
-  'STL': 'tradeogre',
+  'XTL': 'tradeogre',
   'DER': 'cryptopia',
   'MSR': 'stocks.exchange',
-  'ITNS': 'stocks.exchange'
+  'ITNS': 'stocks.exchange',
+  'GRFT': 'tradeogre'
 };
 
 const pricingStrategies = {
-  'TRTL': ({location, algo, newLimit}) => (stringToSatoshis((getCheapestFilledAtLimit(location, algo, newLimit) || {price: 0}).price) + 20000) / 100000000,
+  'TRTL': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
   'ETN': ({price}) => price,
-  'STL': ({price}) => price,
+  // 'ETN': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
+  'XTL': ({price}) => price,
+    // 'XTL': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
   'DER': ({price}) => price,
-  'MSR': ({price}) => price,
-  'ITNS': ({price}) => price
+  // 'MSR': ({price}) => price,
+  'MSR': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
+  'ITNS': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
+  // 'ITNS': ({price}) => price,
+  'GRFT': ({price}) => price
 };
 
+
+
 const exchanges = {
-  'tradeogre': {coins: ['TRTL', 'ETN', 'STL', 'BTC']},
-  'stocks.exchange': {coins: ['MSR']}
+  'tradeogre': {coins: ['TRTL', 'ETN', 'XTL', 'GRFT', 'BTC']},
+  'stocks.exchange': {coins: ['MSR', 'ITNS']},
+  'cryptopia': {coins: [/*'ETN'*/]},
+  'tradesatoshi': {coins: ['TRTL']}
 };
 
 const exchangePrices = {
   'tradeogre': {},
   'cryptopia': {},
-  'stocks.exchange': {'MSR':1420}
+  'stocks.exchange': {'MSR':1550,'ITNS':55},
+  'tradesatoshi': {}
 };
 
 const coinStatus = {
   'TRTL': {selling: true},
   'ETN': {selling: true},
-  'STL': {selling: true},
+  'XTL': {selling: true},
   'DER': {selling: false},
   'MSR': {selling: false},
   'ITNS': {selling: false},
+  'GRFT': {selling: true},
   'BTC': {selling: false}
 };
 
-const managedOrders = {'TRTL': [], 'ETN': [], 'STL': [], 'DER': [], 'MSR': [], 'ITNS': []};
+const walletBalances = {
+  'TRTL': {},
+  'ETN': {},
+  'XTL': {},
+  'DER': {},
+  'ITNS': {},
+  'GRFT': {},
+  'BTC': {},
+  'nicehash': {}
+};
+
+const managedOrders = {'TRTL': [], 'ETN': [], 'XTL': [], 'ITNS': [], 'DER': [], 'MSR': [], 'GRFT': []};
 
 
 const latestOrders = {
@@ -114,34 +249,157 @@ const latestOrders = {
   }
 };
 
+const latestLocationInfo = {
+  '0': {22:{}},
+  '1': {22:{}}
+};
+
 const algo = 22;
 
+const difficultyEmitters = {
+        'TRTL': new EventEmitter(),
+        'ETN': new EventEmitter(),
+        'XTL': new EventEmitter(),
+        'MSR': new EventEmitter(),
+        'ITNS': new EventEmitter(),
+        'GRFT': new EventEmitter()
+      },
+      cheapestEmitter = new EventEmitter();
 
-runAndSchedule(transferWalletToTradeOgre, 60 * 1000);
-// runAndSchedule(transferWalletToTradeSatoshi, 60 * 1000);
-runAndSchedule(transferStelliteWalletToTradeOgre, 60 * 5 * 1000);
-// runAndSchedule(transferEtnWalletToTradeOgre, 60 * 1000);
-runAndSchedule(transferEtnWalletToCryptopia, 60 * 1000);
+
+const getDifficulty = daemonGetInfo => {
+  return new Promise((resolve, reject) => {
+    daemonGetInfo((error, response) => {
+      if (error) return reject(error);
+      resolve([response.difficulty, response.height]);
+    });
+  });
+};
+
+const checkDifficulty = (getDifficulty, coin) => {
+  getDifficulty()
+    .then(([difficulty, height] : [number, number]) => {
+      difficultiesErrorCount[coin] = 0;
+      let timeSinceLast = new Date().getTime() - lastBlocks[coin];
+      if (lastHeights[coin] !== height) {
+        lastBlocks[coin] = new Date().getTime();
+        lastHeights[coin] = height;
+      }
+      if (lastDifficulties[coin] !== difficulty) {
+        const diff = difficulty - lastDifficulties[coin];
+        const secondsSinceLast = (timeSinceLast / 1000).toFixed(1);
+        if (diff > 0) {
+
+          console.log(chalk.red(`^^^^^^^^ ${printCoin(coin)} ${renderBlockInfo(difficulty, lastDifficulties[coin], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
+        }
+        else if (diff < 0) {
+          console.log(chalk.green(`vvvvvvvv ${printCoin(coin)} ${renderBlockInfo(difficulty, lastDifficulties[coin], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
+        }
+        else {
+          console.log(chalk.yellow(`======== ${printCoin(coin)} ${renderBlockInfo(difficulty, lastDifficulties[coin], height, secondsSinceLast, timeSinceLast)} ========`));
+        }
+        lastDifficulties[coin] = difficulty;
+        difficultyEmitters[coin].emit('difficulty', difficulty);
+      }
+    })
+    .catch(error => {
+      difficultiesErrorCount[coin]++;
+
+      console.log('error getting difficulty', error);
+    });
+};
+
+const checkITNSDifficulty = () => checkDifficulty(() => getDifficulty(itnsDaemonGetInfo), 'ITNS');
+const checkGRFTDifficulty = () => checkDifficulty(() => getDifficulty(grftDaemonGetInfo), 'GRFT');
+
+runAndSchedule(checkTRTLDifficulty, 1 * 500);
+runAndSchedule(checkEtnDifficulty, 1 * 500);
+// runAndSchedule(checkXTLDifficulty, 2 * 500);
+runAndSchedule(checkMSRDifficulty, 2 * 500);
+runAndSchedule(checkITNSDifficulty, 2 * 500);
+runAndSchedule(checkGRFTDifficulty, 2 * 500);
+// runAndSchedule(checkTRTLPrice, 30 * 1000);
+runAndSchedule(checkTRTLPrice, 30 * 1000);
+runAndSchedule(checkTRTLTradeSatoshiPrice, 30 * 1000);
+runAndSchedule(checkETNPrice, 30 * 1000);
+runAndSchedule(checkGRFTPrice, 30 * 1000);
+// runAndSchedule(checkETNCryptopiaPrice, 30 * 1000);
+runAndSchedule(checkXTLPrice, 30 * 1000);
+runAndSchedule(checkMSRPrice, 30 * 1000);
+runAndSchedule(checkITNSPrice, 30 * 1000);
+
+
+function checkTRTLPrice() { return checkTradeOgrePrice('TRTL').catch(error => console.error('Error fetching TRTL price', error)); }
+function checkTRTLTradeSatoshiPrice() { return checkTradeSatoshiPrice('TRTL').catch(error => console.error('Error fetching TRTL tradesatoshi price', error)); }
+function checkETNPrice() { return checkTradeOgrePrice('ETN').catch(error => console.error('Error fetching ETN price', error)); }
+function checkETNCryptopiaPrice() { return checkCryptopiaPrice('ETN').catch(error => console.error('Error fetching ETN price', error)); }
+function checkGRFTPrice() { return checkTradeOgrePrice('GRFT').catch(error => console.error('Error fetching GRFT price', error)); }
+function checkXTLPrice() { return checkTradeOgrePrice('XTL').catch(error => console.error('Error fetching XTL price', error)); }
+function checkMSRPrice() { return checkStocksExchangePrice('MSR').catch(error => console.error('Error fetching MSR price', error)); }
+function checkITNSPrice() { return checkStocksExchangePrice('ITNS').catch(error => console.error('Error fetching ITNS price', error)); }
+
+setTimeout(() => {
+  // runAndSchedule(transferWalletToTradeOgre, 60 * 1000);
+  runAndSchedule(transferTRTLWallet, 60 * 1000);
+  // runAndSchedule(transferWalletToTradeSatoshi, 60 * 1000);
+  runAndSchedule(transferStelliteWalletToTradeOgre, 60 * 1000);
+  // runAndSchedule(transferEtnWalletToTradeOgre, 60 * 1000);
+  // runAndSchedule(transferEtnWalletToCryptopia, 60 * 1000);
+  // runAndSchedule(transferMsrWalletToStocksExchange, 60 * 1000);
+  // runAndSchedule(transferEtnWallet, 60 * 1000);
+}, 5 * 1000);
+
+function transferEtnWallet() {
+  const exchange = getBestExchange('ETN');
+
+  if (exchange === 'tradeogre') transferEtnWalletToTradeOgre();
+  else if (exchange === 'cryptopia') transferEtnWalletToCryptopia();
+}
+
+function transferTRTLWallet() {
+  const exchange = getBestExchange('TRTL');
+
+  if (exchange === 'tradeogre') transferWalletToTradeOgre();
+  else if (exchange === 'tradesatoshi') transferWalletToTradeSatoshi();
+}
 
 // setTimeout(() => runAndSchedule(transferWalletToTradeSatoshi, 60 * 1000), 30 * 1000);
 // runAndSchedule(transferToCollectors, 0.2 * 1000);
 
 runAndSchedule(checkNiceHashBalance, 60 * 1000);
 
-runAndSchedule(checkTradeOgreBalances, 60 * 1000);
+runAndSchedule(checkTradeOgreBalances, 30 * 1000);
+
+// const checkWalletBalance = {
+//   'TRTL': () =>
+// };
 
 function checkTradeOgreBalances() {
+  console.log('checking tradeogre balances');
   exchanges['tradeogre'].coins.forEach(coin => {
     getTradeOgreBalance(coin)
       .then(({balance, available}) => {
         console.log(`${chalk.blue('tradeogre')} ${printCoin(coin)} balance ${balance}, available ${parseFloat(available) > 0 ? chalk.yellow(available) : available}`);
 
         if (coinStatus[coin].selling) {
-          console.log(available, exchangePrices['tradeogre'][coin])
-          if (parseFloat(available) * exchangePrices['tradeogre'][coin] >= 10000) {
-            submitTradeOgreSellOrder(`BTC-${coin}`, available, `0.${exchangePrices['tradeogre'][coin].toString().padStart(8, '0')}`)
+
+          const higher = parseFloat(available) * 0.2,
+                basePrice = exchangePrices['tradeogre'][coin],
+                higherPrice = basePrice + 1;
+
+          let lower = parseFloat(available);
+
+          if (higher * higherPrice >= 10000) {
+            lower -= higher + 1;
+            submitTradeOgreSellOrder(`BTC-${coin}`, higher, `0.${higherPrice.toString().padStart(8, '0')}`)
               .then(response => console.log(`tradeogre sell result ${coin} ${JSON.stringify(response)}`))
-              .catch(error => console.error(`error selling ${available} ${coin} on tradeogre`, error))
+              .catch(error => console.error(`error selling ${higher} ${coin} on tradeogre`, error))
+          }
+
+          if (lower * basePrice >= 10000) {
+            submitTradeOgreSellOrder(`BTC-${coin}`, lower, `0.${basePrice.toString().padStart(8, '0')}`)
+              .then(response => console.log(`tradeogre sell result ${coin} ${JSON.stringify(response)}`))
+              .catch(error => console.error(`error selling ${lower} ${coin} on tradeogre`, error))
           }
         }
       })
@@ -214,7 +472,9 @@ function checkNiceHashBalance() {
       const {balance_confirmed: confirmed, balance_pending: pending} = response.body.result,
             total = stringToSatoshis(confirmed) + stringToSatoshis(pending);
 
-      console.log('Nice hash balance:', {confirmed, pending, total: total / 100000000});
+      Object.assign(walletBalances['nicehash'], {confirmed, pending, total: total / 100000000});
+
+      printInfo();
     })
     .catch(error => console.error('Error checking NiceHash balance', error));
 }
@@ -246,14 +506,16 @@ const collectorAmount = 1;
 
 
 function transferStelliteWalletToTradeOgre() {
-  const wallet = stlWallet;
+  const wallet = xtlWallet;
 
   wallet('getbalance', {}, (error, response) => {
     if (error) return console.error('error getting stellite balance', error);
 
     const {balance, unlocked_balance} = response;
 
-    console.log(`${chalk.green('$$$$$$$$$$$$')} ${printCoin('STL')} Wallet Balance: ${(unlocked_balance/100).toFixed(2)} available ||| ${chalk.green((balance / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
+    Object.assign(walletBalances['XTL'], {balance, unlocked_balance});
+
+    // console.log(`${chalk.green('$$$$$$$$$$$$')} ${printCoin('XTL')} Wallet Balance: ${(unlocked_balance/100).toFixed(2)} available ||| ${chalk.green((balance / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
 
     if (unlocked_balance/100 > 1000) {
       // wallet('transfer', {
@@ -268,15 +530,16 @@ function transferStelliteWalletToTradeOgre() {
 
       //   console.log('stellite transfer response', response);
       // });
-      // wallet('sweep_all', {
-      //   'address': 'SEiStP7SMy1bvjkWc9dd1t2v1Et5q2DrmaqLqFTQQ9H7JKdZuATcPHUbUL3bRjxzxTDYitHsAPqF8EeCLw3bW8ARe8rYeorMw6p7nhasUgZ6S',
-      //   'mixin': 1,
-      //   'priority': 3,
-      //   'unlock_time': 0
-      // }, (error, response) => {
-      //   if (error) return console.error('error sweeping stellite wallet', error);
-      //   if (response.tx_hash_list) console.log('swept stellite wallet', 'tx ids', response.tx_hash_list);
-      // });
+      wallet('sweep_all', {
+        'address': 'SEiStP7SMy1bvjkWc9dd1t2v1Et5q2DrmaqLqFTQQ9H7JKdZuATcPHUbUL3bRjxzxTDYitHsAPqF8EeCLw3bW8ARe8rYeorMw6p7nhasUgZ6S',
+        'mixin': 1,
+        'priority': 3,
+        'unlock_time': 0
+      }, (error, response) => {
+        if (error) return console.error('error sweeping stellite wallet', error, response);
+
+        if (response.tx_hash_list) console.log('swept stellite wallet', 'tx ids', response.tx_hash_list);
+      });
     }
   });
 
@@ -306,9 +569,24 @@ function transferEtnWalletToCryptopia() {
     'mixin': 1,
     'unlock_time': 0
   }, (error, response) => {
-    if (error) return console.error('error sweeping etn wallet', error);
+    if (error) return console.error('error sweeping etn wallet', error, response);
 
     if (response) console.log('swept etn wallet', 'tx ids', response.tx_hash_list);
+  });
+}
+
+function transferMsrWalletToStocksExchange() {
+  const wallet = msrWallet;
+
+  wallet('sweep_all', {
+    'address': '5pc8m5HPJtEH8kuVH8eGgnSSuqYQXaPpTHYtxpbymrADCAXYt8xExSM55hi7bHvuCrYSDCYpM2XQkYTvoVupvqi6ASsX3AN',
+    'payment_id': '6327c308515b691b232d67994f982275673a087f6b16769e3196334f3a71cc3f',
+    'mixin': 1,
+    'unlock_time': 0
+  }, (error, response) => {
+    if (error) return console.error('error sweeping msr wallet', error, response);
+
+    if (response) console.log('swept msr wallet', 'tx ids', response.tx_hash_list);
   });
 }
 
@@ -319,9 +597,11 @@ function transferWalletToTradeOgre() {
 
     const {available_balance, locked_amount} = response;
 
-    console.log(`${chalk.green('$$$$$$$$$$$$')} Wallet Balance: ${(available_balance/100).toFixed(2)} available, ${(locked_amount/100).toFixed(2)} locked ||| ${chalk.green(((available_balance + locked_amount) / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
+    Object.assign(walletBalances['TRTL'], {available_balance, locked_amount});
 
-    if (available_balance >  100) {
+    // console.log(`${chalk.green('$$$$$$$$$$$$')} Wallet Balance: ${(available_balance/100).toFixed(2)} available, ${(locked_amount/100).toFixed(2)} locked ||| ${chalk.green(((available_balance + locked_amount) / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
+
+    if (available_balance/100 >  100) {
       const toSend = available_balance - 10,
             turtlebag_amount = Math.floor(toSend * 0.02),
             mastercollector_amount = Math.floor(toSend * 0.005),
@@ -360,7 +640,9 @@ function transferWalletToTradeSatoshi() {
 
     const {available_balance, locked_amount} = response;
 
-    console.log(`${chalk.green('$$$$$$$$$$$$')} Wallet Balance: ${(available_balance/100).toFixed(2)} available, ${(locked_amount/100).toFixed(2)} locked ||| ${chalk.green(((available_balance + locked_amount) / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
+    Object.assign(walletBalances['TRTL'], {available_balance, locked_amount});
+
+    // console.log(`${chalk.green('$$$$$$$$$$$$')} Wallet Balance: ${(available_balance/100).toFixed(2)} available, ${(locked_amount/100).toFixed(2)} locked ||| ${chalk.green(((available_balance + locked_amount) / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
 
     if (available_balance >  100) {
       const toSend = available_balance - 10,
@@ -459,28 +741,6 @@ const config = {
       };
 
 
-const lowerThreshold = 0.3;
-function calculateTurtleLimit(roi) {
-  if (roi < lowerThreshold) return 0.01;
-  // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (0.5 + /*0.5 + */((roi - lowerThreshold) / 0.1) * 0.3) / managedOrders['TRTL'].length;
-  return 0;
-}
-
-function calculateSTLLimit(roi) {
-  if (roi < lowerThreshold) return 0.01;
-  // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (0.5 + /*0.5 + */((roi - lowerThreshold) / 0.1) * 0.3) / managedOrders['STL'].length;
-  return 0;
-}
-
-function calculateMSRLimit(roi) {
-  if (roi < lowerThreshold) return 0.01;
-  // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (0.5 + /*0.5 + */((roi - lowerThreshold) / 0.1) * 0.3) / managedOrders['MSR'].length;
-  return 0;
-}
-
 function pickSchedule(schedules, roi) {
   for (let i = 0; i < schedules.length; i++) {
     var schedule = schedules[i];
@@ -492,24 +752,6 @@ function nhRequest(request, args) {
     console.error('nhRequest error', request, args, error);
   });
 }
-
-const difficultyEmitters = {
-        'TRTL': new EventEmitter(),
-        'ETN': new EventEmitter(),
-        'STL': new EventEmitter(),
-        'MSR': new EventEmitter()
-      },
-      cheapestEmitter = new EventEmitter();
-
-runAndSchedule(checkTRTLDifficulty, 1 * 500);
-runAndSchedule(checkEtnDifficulty, 1 * 500);
-runAndSchedule(checkStlDifficulty, 4 * 500);
-runAndSchedule(checkMSRDifficulty, 4 * 500);
-// runAndSchedule(checkTRTLPrice, 30 * 1000);
-runAndSchedule(checkTRTLPrice, 30 * 1000);
-runAndSchedule(checkETNPrice, 30 * 1000);
-runAndSchedule(checkSTLPrice, 30 * 1000);
-runAndSchedule(checkMSRPrice, 90 * 1000);
 
 function checkMSRDifficulty() {
   getMSRDifficulty()
@@ -525,13 +767,13 @@ function checkMSRDifficulty() {
         const secondsSinceLast = (timeSinceLast / 1000).toFixed(1);
         if (diff > 0) {
 
-          console.log(chalk.red(`^^^^^^^^ MSR ${renderBlockInfo(difficulty, lastDifficulties['MSR'], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
+          console.log(chalk.red(`^^^^^^^^ ${printCoin('MSR')} ${renderBlockInfo(difficulty, lastDifficulties['MSR'], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
         }
         else if (diff < 0) {
-          console.log(chalk.green(`vvvvvvvv MSR ${renderBlockInfo(difficulty, lastDifficulties['MSR'], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
+          console.log(chalk.green(`vvvvvvvv ${printCoin('MSR')} ${renderBlockInfo(difficulty, lastDifficulties['MSR'], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
         }
         else {
-          console.log(chalk.yellow(`======== MSR ${renderBlockInfo(difficulty, lastDifficulties['MSR'], height, secondsSinceLast, timeSinceLast)} ========`));
+          console.log(chalk.yellow(`======== ${printCoin('MSR')} ${renderBlockInfo(difficulty, lastDifficulties['MSR'], height, secondsSinceLast, timeSinceLast)} ========`));
         }
         lastDifficulties['MSR'] = difficulty;
         difficultyEmitters['MSR'].emit('difficulty', difficulty);
@@ -553,6 +795,7 @@ function getMSRDifficulty() {
   });
 }
 
+
 function checkEtnDifficulty() {
   getEtnDifficulty()
     .then(([difficulty, height] : [number, number]) => {
@@ -567,13 +810,13 @@ function checkEtnDifficulty() {
         const secondsSinceLast = (timeSinceLast / 1000).toFixed(1);
         if (diff > 0) {
 
-          console.log(chalk.red(`^^^^^^^^ ETN ${renderBlockInfo(difficulty, lastDifficulties['ETN'], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
+          console.log(chalk.red(`^^^^^^^^ ${printCoin('ETN')} ${renderBlockInfo(difficulty, lastDifficulties['ETN'], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
         }
         else if (diff < 0) {
-          console.log(chalk.green(`vvvvvvvv ETN ${renderBlockInfo(difficulty, lastDifficulties['ETN'], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
+          console.log(chalk.green(`vvvvvvvv ${printCoin('ETN')} ${renderBlockInfo(difficulty, lastDifficulties['ETN'], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
         }
         else {
-          console.log(chalk.yellow(`======== ETN ${renderBlockInfo(difficulty, lastDifficulties['ETN'], height, secondsSinceLast, timeSinceLast)} ========`));
+          console.log(chalk.yellow(`======== ${printCoin('ETN')} ${renderBlockInfo(difficulty, lastDifficulties['ETN'], height, secondsSinceLast, timeSinceLast)} ========`));
         }
         lastDifficulties['ETN'] = difficulty;
         difficultyEmitters['ETN'].emit('difficulty', difficulty);
@@ -599,34 +842,34 @@ function getEtnDifficulty() {
   });
 }
 
-function checkStlDifficulty() {
-  getStlDifficulty()
+function checkXTLDifficulty() {
+  getXTLDifficulty()
     .then(([difficulty, height] : [number, number]) => {
-      difficultiesErrorCount['STL'] = 0;
-      let timeSinceLast = new Date().getTime() - lastBlocks['STL'];
-      if (lastHeights['STL'] !== height) {
-        lastBlocks['STL'] = new Date().getTime();
-        lastHeights['STL'] = height;
+      difficultiesErrorCount['XTL'] = 0;
+      let timeSinceLast = new Date().getTime() - lastBlocks['XTL'];
+      if (lastHeights['XTL'] !== height) {
+        lastBlocks['XTL'] = new Date().getTime();
+        lastHeights['XTL'] = height;
       }
-      if (lastDifficulties['STL'] !== difficulty) {
-        const diff = difficulty - lastDifficulties['STL'];
+      if (lastDifficulties['XTL'] !== difficulty) {
+        const diff = difficulty - lastDifficulties['XTL'];
         const secondsSinceLast = (timeSinceLast / 1000).toFixed(1);
         if (diff > 0) {
 
-          console.log(chalk.red(`^^^^^^^^ STL ${renderBlockInfo(difficulty, lastDifficulties['STL'], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
+          console.log(chalk.red(`^^^^^^^^ ${printCoin('XTL')} ${renderBlockInfo(difficulty, lastDifficulties['XTL'], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
         }
         else if (diff < 0) {
-          console.log(chalk.green(`vvvvvvvv STL ${renderBlockInfo(difficulty, lastDifficulties['STL'], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
+          console.log(chalk.green(`vvvvvvvv ${printCoin('XTL')} ${renderBlockInfo(difficulty, lastDifficulties['XTL'], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
         }
         else {
-          console.log(chalk.yellow(`======== STL ${renderBlockInfo(difficulty, lastDifficulties['STL'], height, secondsSinceLast, timeSinceLast)} ========`));
+          console.log(chalk.yellow(`======== ${printCoin('XTL')} ${renderBlockInfo(difficulty, lastDifficulties['XTL'], height, secondsSinceLast, timeSinceLast)} ========`));
         }
-        lastDifficulties['STL'] = difficulty;
-        difficultyEmitters['STL'].emit('difficulty', difficulty);
+        lastDifficulties['XTL'] = difficulty;
+        difficultyEmitters['XTL'].emit('difficulty', difficulty);
       }
     })
     .catch(error => {
-      difficultiesErrorCount['STL']++;
+      difficultiesErrorCount['XTL']++;
 
       // if (etnDifficultyErrorCount > 1) {
       //   slowAllOrders();
@@ -635,9 +878,9 @@ function checkStlDifficulty() {
     });
 }
 
-function getStlDifficulty() {
+function getXTLDifficulty() {
   return new Promise((resolve, reject) => {
-    stlDaemonGetInfo((error, response) => {
+    xtlDaemonGetInfo((error, response) => {
       if (error) return reject(error);//return console.error('getinfo error', error);
       // console.log(response);
       resolve([response.difficulty, response.height]);
@@ -645,8 +888,9 @@ function getStlDifficulty() {
   });
 }
 
-difficultyEmitters['TRTL'].once('difficulty', () => {
-  runAndSchedule(checkOrders, 10 * 1000);
+runAndSchedule(checkOrders, 10 * 1000);
+
+setTimeout(() => {
   // runAndSchedule(projectDifficulty, 10 * 1000);
 
   runAndSchedule(() => updateOrdersStats(0, algo), 10 * 1000);
@@ -654,16 +898,18 @@ difficultyEmitters['TRTL'].once('difficulty', () => {
 
   getAndManageOrders(0, 22);
   getAndManageOrders(1, 22);
+}, 1500);
+
+Object.values(difficultyEmitters).forEach(emitter => {
+  emitter.on('difficulty', () => {
+    printInfo();
+  });
 });
 
-difficultyEmitters['TRTL'].on('difficulty', () => {
-  printOrders(0, algo);
-  printOrders(1, algo);
-});
 
 
 function checkTRTLDifficulty() {
-  getDifficulty()
+  getTrtlDifficulty()
     .then(([difficulty, height] : [number, number]) => {
       difficultiesErrorCount['TRTL'] = 0;
       let timeSinceLast = new Date().getTime() - lastBlocks['TRTL'];
@@ -676,13 +922,13 @@ function checkTRTLDifficulty() {
         const secondsSinceLast = (timeSinceLast / 1000).toFixed(1);
         if (diff > 0) {
 
-          console.log(chalk.red(`^^^^^^^^ TRTL ${renderBlockInfo(difficulty, lastDifficulties['TRTL'], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
+          console.log(chalk.red(`^^^^^^^^ ${printCoin('TRTL')} ${renderBlockInfo(difficulty, lastDifficulties['TRTL'], height, secondsSinceLast, timeSinceLast)} ^^^^^^^^`));
         }
         else if (diff < 0) {
-          console.log(chalk.green(`vvvvvvvv TRTL ${renderBlockInfo(difficulty, lastDifficulties['TRTL'], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
+          console.log(chalk.green(`vvvvvvvv ${printCoin('TRTL')} ${renderBlockInfo(difficulty, lastDifficulties['TRTL'], height, secondsSinceLast, timeSinceLast)} vvvvvvvv`));
         }
         else {
-          console.log(chalk.yellow(`======== TRTL ${renderBlockInfo(difficulty, lastDifficulties['TRTL'], height, secondsSinceLast, timeSinceLast)} ========`));
+          console.log(chalk.yellow(`======== ${printCoin('TRTL')} ${renderBlockInfo(difficulty, lastDifficulties['TRTL'], height, secondsSinceLast, timeSinceLast)} ========`));
         }
         lastDifficulties['TRTL'] = difficulty;
         difficultyEmitters['TRTL'].emit('difficulty', difficulty);
@@ -723,23 +969,20 @@ function slowAllOrders() {
   });
 }
 
-
-function checkTRTLPrice() { return checkTradeOgrePrice('TRTL').catch(error => console.error('Error fetching TRTL price', error)); }
-function checkETNPrice() { return checkTradeOgrePrice('ETN').catch(error => console.error('Error fetching ETN price', error)); }
-function checkSTLPrice() { return checkTradeOgrePrice('STL').catch(error => console.error('Error fetching STL price', error)); }
-function checkMSRPrice() { return checkStocksExchangePrice('MSR').catch(error => console.error('Error fetching MSR price', error)); }
-
 function checkCryptopiaPrice(symbol) {
   return new Promise((resolve, reject) => {
     fetchUrl(`https://www.cryptopia.co.nz/api/GetMarket/${symbol}_BTC`, (error, meta, body) => {
       if (error) return reject(error);
 
-      const {Data:{BidPrice}} = JSON.parse(body.toString()),
-            satoshis = stringToSatoshis(BidPrice);
+      try {
+        const {Data:{BidPrice}} = JSON.parse(body.toString()),
+              satoshis = stringToSatoshis(BidPrice);
 
-      console.log(`${printCoin(symbol)} PRICE [cryptopia]:`, chalk.yellow(satoshis.toString()));
-      exchangePrices['cryptopia'][symbol] = satoshis;
-      return resolve(satoshis);
+        console.log(`${printCoin(symbol)} PRICE [cryptopia]:`, chalk.yellow(satoshis.toString()));
+        exchangePrices['cryptopia'][symbol] = satoshis;
+        return resolve(satoshis);
+      }
+      catch (e) { return reject(e); }
     });
   });
 }
@@ -769,26 +1012,49 @@ function checkTradeOgrePrice(symbol) {
       if (error) return reject(error);
        // return console.error(`Error checking ${symbol} price`, error);
 
-      const {buy} = JSON.parse(body.toString());
+      try {
+        const {buy} = JSON.parse(body.toString());
 
-      const prices = Object.keys(buy).map(key => {
-        const [f, s] = key.split('.'),
-              satoshis = parseInt(f) * 100000000 + parseInt(s);
-        return satoshis;
-      });
+        const prices = Object.keys(buy).map(stringToSatoshis);
 
-      prices.sort().reverse();
+        prices.sort((a, b) => a < b ? -1 : 1).reverse();
 
-      if (prices.length > 0) {
-        console.log(`${printCoin(symbol)} PRICE [tradeogre]:`, chalk.yellow((prices[0] || 0).toString()));
-        exchangePrices['tradeogre'][symbol] = prices[0] || 0;
-        return resolve(prices[0]);
+        if (prices.length > 0) {
+          console.log(`${printCoin(symbol)} PRICE [tradeogre]:`, chalk.yellow((prices[0] || 0).toString()));
+          exchangePrices['tradeogre'][symbol] = prices[0] || 0;
+          return resolve(prices[0]);
+        }
+        return resolve(0);
       }
-      return resolve(0);
+      catch (error) {
+        reject(error);
+      }
     });
   });
 }
 
+function checkTradeSatoshiPrice(symbol) {
+  return new Promise((resolve, reject) => {
+    fetchUrl(`https://tradesatoshi.com/api/public/getmarketsummary?market=${symbol}_BTC`, (error, meta, body) => {
+      if (error) return reject(error);
+       // return console.error(`Error checking ${symbol} price`, error);
+      try {
+        const result = JSON.parse(body.toString());
+
+        if (result.success) {
+          const satoshis = stringToSatoshis(result.result.bid.toFixed(8));
+          console.log(`${printCoin(symbol)} PRICE [tradesatoshi]:`, chalk.yellow(satoshis.toString()));
+          exchangePrices['tradesatoshi'][symbol] = satoshis;
+          return resolve(satoshis);
+        }
+        return resolve(0);
+      }
+      catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
 
 const difficultyWindow = 17;
 function projectDifficulty() {
@@ -840,8 +1106,21 @@ function getBlocksInfo() {
 }
 
 function stringToSatoshis(str) {
+  // console.log('sts', str);
   const [big, little] = str.toString().split('.');
-  return parseInt(little.padEnd(8, '0')) + parseInt(big) * 100000000
+  return parseInt((little || '').padEnd(8, '0')) + parseInt(big) * 100000000
+}
+
+function getCoinFromPoolUser(pool_user) {
+  switch (pool_user) {
+    case 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR.600000': return 'TRTL';
+    case 'etnk1FzHAgEH2p15Usyzy5UhYocszGggwFaHE6k8Z1ZSBE4kww7azLkT3qgVFgKn5LaVxV9NRssPu5PsWLtJteZw9v6yhMEVRA.600000': return 'ETN';
+    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy':
+    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy.600000': return 'XTL';
+    case '5iJjH9UH36SgL367R3F6WD638qQmeRyWrEXFnTKURLtZW196MdueJ6TJnJJN4PEnRhM6au2QYRLdmNoyta2Qwax71irJXuU.600000': return 'MSR';
+    case 'GMPHYf5KRkcAyik7Jw9oHRfJtUdw2Kj5f4VTFJ25AaFVYxofetir8Cnh7S76Q854oMXzwaguL8p5KEz1tm3rn1SA6ntd2X7G1ZENVN6Sdh+600000': return 'GRFT';
+    case 'iz44v9Cs9XtPAXqdTwAbQPBMNqQWhY1ns77imdefBk641UfEsVN8zLqAFjrtHbaMv1TygTcvJWzGN3zNR6PeEYuc1w8UuQafE.745d0a1a35ba0813fb28d39585698613a31ee26d0921621f40797823f18f2adf+600000': return 'ITNS';
+  }
 }
 
 function getAndManageOrders(location, algo) {
@@ -850,23 +1129,10 @@ function getAndManageOrders(location, algo) {
       const orders = response.body.result.orders;
 
       orders.forEach(order => {
-        const {id, price, limit_speed, pool_user} = order;
-        if (pool_user === 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR.600000') { // turtlecoin
-          manageOrder(id, stringToSatoshis(price), Object.assign({}, config, {location, algo, limit: parseFloat(limit_speed)}), nh, calculateTurtleLimit, 'TRTL');
-        }
-        else if (pool_user === 'etnk1FzHAgEH2p15Usyzy5UhYocszGggwFaHE6k8Z1ZSBE4kww7azLkT3qgVFgKn5LaVxV9NRssPu5PsWLtJteZw9v6yhMEVRA.600000') { // electroneum
-          manageOrder(id, stringToSatoshis(price), Object.assign({}, config, {location, algo, limit: parseFloat(limit_speed)}), nh, roi => roi > 0.15 ? 0.5 : 0.01, 'ETN');
-          // , 'ETN'
-        }
-        else if (pool_user === 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy.600000' ||
-                 pool_user === 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy') { // stellite
-          manageOrder(id, stringToSatoshis(price), Object.assign({}, config, {location, algo, limit: parseFloat(limit_speed)}), nh, calculateSTLLimit, 'STL');
-          // , 'STL'
-        }
-        else if (pool_user === '5iJjH9UH36SgL367R3F6WD638qQmeRyWrEXFnTKURLtZW196MdueJ6TJnJJN4PEnRhM6au2QYRLdmNoyta2Qwax71irJXuU.600000') { // masari
-          manageOrder(id, stringToSatoshis(price), Object.assign({}, config, {location, algo, limit: parseFloat(limit_speed)}), nh, calculateMSRLimit, 'MSR');
-        }
-        // else console.log('Unknown pool_user', pool_user, order);
+        const {id, price, limit_speed, pool_user, pool_host} = order,
+              coin = getCoinFromPoolUser(pool_user);
+
+        if (managedOrders[coin]) manageOrder(id, stringToSatoshis(price), Object.assign({}, config, {pool_host, location, algo, limit: parseFloat(limit_speed)}), nh, limitFn[coin], coin);
       });
     })
     .catch(error => console.error('ERROR getting and managing orders', location, algo, error));
@@ -882,6 +1148,25 @@ function getCheapestFilledAtLimit(location, algo, limit) {
   }
 }
 
+function getPriceForLimit(location, algo, limit, currentWorkers) {
+  const orders = latestOrders[location][algo],
+        {hashrate_per_worker} = latestLocationInfo[location][algo];
+
+  let workerCount = 0;
+  for (let i = orders.length - 1; i >= 0; i--) {
+    const order = orders[i];
+
+    // console.log(order.price);
+
+    workerCount += order.workers;
+
+    if (workerCount * hashrate_per_worker >= limit) {
+      return order;
+    }
+  }
+  return orders[0]; //?
+}
+
 const cheapestGreaterThan1MHAtLocation = {},
       cheapestFilledAtLocation = {};
 
@@ -891,6 +1176,8 @@ function checkLocationOrders(location, algo) {
       const orders = result.body.result.orders.filter(order => order.type === 0).sort((a, b) => parseFloat(a.price) > parseFloat(b.price) ? -1 : 1);
 
       latestOrders[location][algo] = orders;
+
+      broadcast(JSON.stringify({location, algo, orders}));
 
       let cheapestFilled = orders[0],
           cheapestGreaterThan1MH = orders[0];
@@ -911,33 +1198,41 @@ function checkLocationOrders(location, algo) {
 
       cheapestEmitter.emit('updated');
 
-      printOrdersSummary(location, algo, orders);
+      printInfo();
     })
     .catch(error => console.log('error getting orders', location, algo, error));
 }
 
-const summaryPrints = {
-  0: {
-    22: ''
-  },
-  1: {
-    22: ''
-  }
-};
 
 function printOrdersSummary(location, algo, orders = []) {
-  const total_speed = orders.reduce((sum, {accepted_speed}) => sum + parseFloat(accepted_speed) * 1000, 0);
+  const total_speed = orders.reduce((sum, {accepted_speed}) => sum + parseFloat(accepted_speed) * 1000, 0),
+        total_workers = orders.reduce((sum, {workers}) => sum + workers, 0),
+        hashrate_per_worker = total_speed / total_workers;
+
 
   const cheapestFilled = cheapestFilledAtLocation[location],
         cheapestGreaterThan1MH = cheapestGreaterThan1MHAtLocation[location],
-        price = stringToSatoshis(cheapestGreaterThan1MH.price) + 10000;
+        price = stringToSatoshis(cheapestFilled.price) + 10000;
 
-  const rois = ['TRTL', 'STL', 'ETN', 'MSR'].map(coin => `${printCoin(coin)}:${printROI(calculateROI(coin, lastDifficulties[coin], price))}`).join('|');
+  const rois = ['TRTL', 'XTL', 'ETN', 'MSR', 'ITNS', 'GRFT'].map(coin => `${printCoin(coin)}:${printROI(calculateROI(coin, lastDifficulties[coin], price))}`).join('|');
 
-  const s = `[${printPrice(cheapestFilled.price)} (${(parseFloat(cheapestFilled.accepted_speed) * 1000).toFixed(2)} MH/s)|${printPrice(cheapestGreaterThan1MH.price)} (${(parseFloat(cheapestGreaterThan1MH.accepted_speed) * 1000).toFixed(2)} MH/s)] [${renderLocation(location)}] [ROI|${rois}] ${renderAlgo(algo)} [${orders.length} orders] (${total_speed.toFixed(2)} MH/s)`;
+  const s = `${renderLocation(location)}[ROI|${rois}][${printMarketSummary(orders)}]${renderAlgo(algo)}[${orders.length} orders](${total_speed.toFixed(2)} MH/s){${total_workers} w)}[${hashrate_per_worker.toFixed(6)} MH/s/w]`;
 
-  if (s != summaryPrints[location][algo]) console.log(s);
-  summaryPrints[location][algo] = s;
+  console.log(s);
+
+  latestLocationInfo[location][algo] = {total_speed, total_workers, hashrate_per_worker, cheapestFilled};
+}
+
+function printMarketSummary(orders) {
+  // const total_workers = orders.reduce((sum, {accepted_speed}) => sum + parseFloat(accepted_speed) * 1000, 0);
+  const {max, min} = orders.filter(order => order.alive).reduce((agg, order) => (agg.min = Math.min(agg.min, parseInt(order.workers) > 0 ? stringToSatoshis(order.price) : Infinity), agg.max = Math.max(agg.max, stringToSatoshis(order.price)), agg), {max: -Infinity, min: Infinity}),
+        bins = 5,
+        binSize = (max + 1 - min) / bins;
+
+  const speed_price_histo = orders.filter(order => order.alive && stringToSatoshis(order.price) >= min).reduce((h, order) => (h[Math.floor((stringToSatoshis(order.price) - min) / binSize)] += parseFloat(order.accepted_speed) * 1000, h), new Array(bins).fill(0));
+
+  // console.log({max, min, bins, binSize, speed_price_histo});
+  return `${printPrice(min / 100000000)}|${speed_price_histo.map(speed => speed.toFixed(1)).join('|')}|${printPrice(max / 100000000)}||${printPrice(binSize/100000000)}`;
 }
 
 function checkOrders() {
@@ -945,7 +1240,7 @@ function checkOrders() {
   checkLocationOrders(1, algo);
 }
 
-function getDifficulty() {
+function getTrtlDifficulty() {
   return new Promise((resolve, reject) => {
     daemonGetInfo((error, response) => {
       if (error) return reject(error);//return console.error('getinfo error', error);
@@ -968,8 +1263,30 @@ function throttle(fn, time) {
   }
 }
 
-function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, limit, minimumMineTime, location, algo}, nh, calculateLimit, coin) {
-  console.log('Now managing', order, 'on', renderLocation(location));
+function startPool(host) {
+  console.log('start pool', host);
+  const ssh = spawn('ssh', [`core@${host}`, `"cd turtle-pool && ./run"`], {shell: true});
+
+  // ssh.stdout.on('data', data => console.log('start pool: ', data.toString()));
+  // ssh.stderr.on('data', data => console.log('ERROR start pool: ', data.toString()));
+  ssh.on('close', code => console.log('start pool ended with code', code));
+
+  poolStatus[host] = 'started';
+}
+
+function stopPool(host) {
+  console.log('stop pool', host);
+  const ssh = spawn('ssh', [`core@${host}`, `"cd turtle-pool && docker kill turtlepool-pool"`], {shell: true});
+
+  ssh.stdout.on('data', data => console.log('stop pool: ', data.toString()));
+  ssh.stderr.on('data', data => console.log('ERROR stop pool: ', data.toString()));
+  ssh.on('close', code => console.log('stop pool ended with code', code));
+
+  poolStatus[host] = 'stopped';
+}
+
+function manageOrder(order, price, {pool_host, threshold, roiThreshold, roiEndThreshold, limit, minimumMineTime, location, algo}, nh, calculateLimit, coin) {
+  console.log('Now managing', order, 'on', renderLocation(location), coin);
   let startTime;
 
   const orderData = {order, limit, location, algo, price, coin, settingPrice: false, settingLimit: false};
@@ -1013,6 +1330,10 @@ function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, li
 
   function checkROIWithDifficulty(difficulty, start, stop) {
     const roi = calculateROI(coin, difficulty, orderData.price);
+
+    if (poolStartFn[coin]({roi}) && poolStatus[pool_host] !== 'started') startPool(pool_host);
+    else if (poolStopFn[coin]({roi}) && poolStatus[pool_host] !== 'stopped') stopPool(pool_host);
+
     start(difficulty, isNaN(roi) ? 0 : roi);
   }
 
@@ -1039,23 +1360,26 @@ function manageOrder(order, price, {threshold, roiThreshold, roiEndThreshold, li
         });
     }
 
-    setTimeout(() => {
-      // const price = parseFloat(cheapestGreaterThan1MHAtLocation[location].price) + 0.0002;
-      const price = pricingStrategies[coin]({location, algo, newLimit, price: orderData.price});
-      if (orderData.price < price && !orderData.settingPrice) {
-        orderData.settingPrice = true;
-        nh.setOrderPrice({location, algo, order, price})
-          .then(response => {
-            console.log(chalk.yellow('set order price response', JSON.stringify(response.body)));
-            if (response.body.result.success) orderData.price = price;
-            orderData.settingPrice = false;
-          })
-          .catch(error => {
-            console.log('error setting price', error);
-            orderData.settingPrice = false;
-          });
-      }
-    }, Math.random() * 5 * 1000);
+    if (newLimit > 0.01) {
+      setTimeout(() => {
+        // const price = parseFloat(cheapestGreaterThan1MHAtLocation[location].price) + 0.0002;
+        const price = pricingStrategies[coin]({location, algo, newLimit, price: orderData.price, workers: ordersDB[coin][location][algo][orderData.order].workers || 0});
+
+        if (orderData.price < price && !orderData.settingPrice) {
+          orderData.settingPrice = true;
+          nh.setOrderPrice({location, algo, order, price: price / 100000000})
+            .then(response => {
+              orderData.settingPrice = false;
+              console.log(chalk.yellow('set order price response', JSON.stringify(response.body)));
+              if (response.body.result.success) orderData.price = price;
+            })
+            .catch(error => {
+              orderData.settingPrice = false;
+              console.log('error setting price', error);
+            });
+        }
+      }, Math.random() * 3 * 1000);
+    }
   }
 
   function slowNiceHash() {
@@ -1099,19 +1423,43 @@ function renderAlgo(algo) {
   return algo === 22 ? 'CryptoNight' : 'unknown algo';
 }
 
-const networkRewards = {
-  'TRTL': 29650,
-  'ETN': 6795,
-  'STL': 18535,
-  'ITNS': 1475,
-  'MSR': 27.7278
-};
+function getBestExchange(coin) {
+  const coinExchanges = Object.keys(exchanges).reduce((e, exchange) => {
+    if (exchanges[exchange].coins.indexOf(coin) >= 0) e.push(exchange);
+    return e;
+  }, []);
+
+  let price = 0, exchange;
+  for (let i = 0; i < coinExchanges.length; i++) {
+    const exchangePrice = exchangePrices[coinExchanges[i]][coin];
+    if (exchangePrice > price) {
+      exchange = coinExchanges[i];
+      price = exchangePrice;
+    }
+  }
+  return exchange;
+}
+
+function getBestExchangePrice(coin) {
+  const coinExchanges = Object.keys(exchanges).reduce((e, exchange) => {
+    if (exchanges[exchange].coins.indexOf(coin) >= 0) e.push(exchange);
+    return e;
+  }, []);
+
+  let price = 0;
+  for (let i = 0; i < coinExchanges.length; i++) {
+    const exchangePrice = exchangePrices[coinExchanges[i]][coin];
+    if (exchangePrice > price) price = exchangePrice;
+  }
+  return price;
+}
 
 function calculateROI(coin, difficulty, niceHashBTCPrice) {
   const payout = (1000000 * 86400) / difficulty * networkRewards[coin],
-        cost = niceHashBTCPrice / exchangePrices[currentExchange[coin]][coin],
+        // cost = niceHashBTCPrice / exchangePrices[currentExchange[coin]][coin],
+        cost = niceHashBTCPrice / getBestExchangePrice(coin),
         profit = payout - cost,
-        roi = profit /cost;
+        roi = profit /cost - 0.03; // 3% nicehash fee!
 
   return roi;
 }
@@ -1129,14 +1477,15 @@ function updateOrdersStats(location, algo) {
       orders.forEach(order => {
         order.location = location;
         order.coin = getCoin(order.pool_user);
-        ordersDB[order.coin || 'unknown'][location][algo][order.id] = Object.assign(ordersDB[order.coin][order.id] || {}, order);
+        ordersDB[order.coin || 'unknown'][location][algo][order.id] = Object.assign(ordersDB[order.coin || 'unknown'][location][algo][order.id] || {}, order);
         // if (!order.alive) {
         //   for (let i = managedOrders.length - 1; i >= 0; i--) {
         //     if (managedOrders[i].id === order.id) managedOrders.splice(i, 1);
         //   }
         // }
       });
-      printOrders(location, algo);
+      // printOrders(location, algo);
+      printInfo();
     })
     .catch(error => console.log('Error updating order stats', error));
 }
@@ -1146,18 +1495,103 @@ function getCoin(pool_user) {
     case 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR.600000': return 'TRTL';
     case 'etnk1FzHAgEH2p15Usyzy5UhYocszGggwFaHE6k8Z1ZSBE4kww7azLkT3qgVFgKn5LaVxV9NRssPu5PsWLtJteZw9v6yhMEVRA.600000': return 'ETN';
     case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy':
-    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy.600000': return 'STL';
+    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy.600000': return 'XTL';
     case 'dERoMN3xY15U2hL8yJeHPGQN2YaRWSTmcdvFEC9rjQUz1qDFnxTk7xeJVQkRkbfR5cNFPSNynviNsPXRxHELvfo28tXuUfwRBZ.600000': return 'DER';
     case '5iJjH9UH36SgL367R3F6WD638qQmeRyWrEXFnTKURLtZW196MdueJ6TJnJJN4PEnRhM6au2QYRLdmNoyta2Qwax71irJXuU.600000': return 'MSR';
     case 'iz44v9Cs9XtPAXqdTwAbQPBMNqQWhY1ns77imdefBk641UfEsVN8zLqAFjrtHbaMv1TygTcvJWzGN3zNR6PeEYuc1w8UuQafE.745d0a1a35ba0813fb28d39585698613a31ee26d0921621f40797823f18f2adf+600000': return 'ITNS';
+    case 'GMPHYf5KRkcAyik7Jw9oHRfJtUdw2Kj5f4VTFJ25AaFVYxofetir8Cnh7S76Q854oMXzwaguL8p5KEz1tm3rn1SA6ntd2X7G1ZENVN6Sdh+600000': return 'GRFT';
   }
   return 'unknown';
 }
 
 let lastBTCAvail = 0;
 
+function printInfo() {
+  console.log('----------------------');
+
+  printOrdersSummary(0, algo, latestOrders[0][algo]);
+  printOrdersSummary(1, algo, latestOrders[1][algo]);
+  console.log('**********************');
+  printAllOrders();
+  printExchangeSummary();
+  printWalletSummary();
+  console.log('---------------------');
+
+  // ,.-'`
+}
+
+function printAllOrders() {
+  Object
+    .keys(ordersDB)
+    .forEach(coin => {
+      const coinDB = ordersDB[coin],
+            usa = Object.values(coinDB['1'][22]),
+            eur = Object.values(coinDB['0'][22]),
+            combined = usa.concat(eur),
+            total_limit = combined.reduce((sum, order) => sum + parseFloat(order.limit_speed), 0),
+            accepted_speed = combined.reduce((sum, order) => sum + parseFloat(order.accepted_speed) * 1000, 0),
+            total_workers = combined.reduce((sum, order) => sum + order.workers, 0),
+            limit_hourly_rate = combined.reduce((sum, order) => {
+              const costPerHour = parseFloat(order.limit_speed) * parseFloat(order.price) / 24;
+              return sum + (costPerHour * (1 + calculateROI(coin, lastDifficulties[coin], stringToSatoshis(order.price))) - costPerHour);
+            }, 0),
+            accepted_hourly_rate = combined.reduce((sum, order) => {
+              const costPerHour = parseFloat(order.accepted_speed) * 1000 * parseFloat(order.price) / 24;
+              return sum + (costPerHour * (1 + calculateROI(coin, lastDifficulties[coin], stringToSatoshis(order.price))) - costPerHour);
+            }, 0),
+            estimated_hashrate = usa.reduce((sum, order) => sum + order.workers, 0) * latestLocationInfo[1][22]['hashrate_per_worker'] + eur.reduce((sum, order) => sum + order.workers, 0) * latestLocationInfo[0][22]['hashrate_per_worker'];
+
+      if (usa.length > 0 || eur.length > 0) console.log(`\n${printCoin(coin)} (${usa.length+eur.length}) [${lastDifficulties[coin]}] (${printWorkers(total_workers)} w) [l:${printLimit(total_limit.toFixed(2))}.a:${printLimit(accepted_speed.toFixed(2))}.e:${printLimit(estimated_hashrate.toFixed(2))}| l:<B${printRate(limit_hourly_rate)}/hr>a:<B${printRate(accepted_hourly_rate)}/hr>`);
+
+      if (usa.length > 0) {
+        console.log(` USA (${usa.length})`)
+        for (let i = 0; i < usa.length; i++) console.log(`  ${formatOrder(usa[i])}`);
+      }
+
+      if (eur.length > 0) {
+        console.log(` EUR (${eur.length})`);
+        for (let i = 0; i < eur.length; i++) console.log(`  ${formatOrder(eur[i])}`);
+      }
+    });
+
+  let btc_avail = 0, orders = 0, avails = [];
+  Object
+    .values(ordersDB)
+    .forEach(coinDB =>
+      Object
+        .values(coinDB)
+        .forEach(location =>
+          Object
+            .values(location)
+            .forEach(algo =>
+              Object
+                .values(algo)
+                .forEach(order => {
+                  const [big, little] = order['btc_avail'].split('.');
+                  btc_avail += parseInt(little.padEnd(8, '0')) + parseInt(big) * 100000000;
+                  avails.push([parseInt(big), parseInt(little.padEnd(8, '0'))]);
+                  orders++;
+                }))));
+
+    console.log('\nBTC AVAIL:', btc_avail / 100000000, 'from', orders, 'orders');
+    lastBTCAvail = btc_avail;
+}
+
+function printExchangeSummary() {
+  const summary =
+    Object
+      .keys(exchangePrices)
+      .map(exchange => `[${exchange}: (${Object.keys(exchangePrices[exchange]).map(coin => `${printCoin(coin)}: ${exchangePrices[exchange][coin]}`).join(', ')})]`);
+
+  console.log(summary.join(' '));
+}
+
+function printWalletSummary() {
+  console.log(Object.keys(walletBalances).map(coin => `${coin}: ${JSON.stringify(walletBalances[coin])}`).join(' '));
+}
+
 function printOrders(location, algo) {
-  Object.values(ordersDB).forEach(coinDB => coinDB[location][algo].forEach(printOrder));
+  Object.values(ordersDB).forEach(coinDB => Object.values(coinDB[location][algo]).forEach(printOrder));
 
   let btc_avail = 0, orders = 0, avails = [];
   Object
@@ -1182,6 +1616,23 @@ function printOrders(location, algo) {
     lastBTCAvail = btc_avail;
 }
 
+function groupBy(list, selector) {
+  return list.reduce((groups, item) => {
+    const key = selector(item);
+    (groups[key] = groups[key] || []).push(item);
+    return groups;
+  });
+}
+
+function mergeGroupings(g1, g2) {
+  const merged = {};
+
+  Object.keys(g1).forEach(key => merged[key] = [].concat(g1[key]));
+  Object.keys(g2).forEach(key => merged[key] = (merged[key] = merged[key] || []).concat(g1[key]));
+
+  return merged;
+}
+
 const lastPrints = {
   '0': {
     '22': {}
@@ -1191,7 +1642,16 @@ const lastPrints = {
   }
 };
 
-function printOrder({id, coin, algo, btc_avail, limit_speed, price, end, workers, btc_paid, location, accepted_speed}) {
+function printOrder(order) {
+  const s = formatOrder(order),
+        {location, algo, id} = order;
+
+  if (s != lastPrints[location][algo][id]) console.log(s);
+
+  lastPrints[location][algo][id] = s;
+}
+
+function formatOrder({id, coin, algo, btc_avail, limit_speed, price, end, workers, btc_paid, location, accepted_speed, alive}) {
   const avail = parseFloat(btc_avail),
         paid = parseFloat(btc_paid),
         roi = calculateROI(coin, lastDifficulties[coin], stringToSatoshis(price)),
@@ -1201,12 +1661,12 @@ function printOrder({id, coin, algo, btc_avail, limit_speed, price, end, workers
         acceptedProfitPerHour = acceptedCostPerHour * (1 + roi) - acceptedCostPerHour,
         {workersAbove, workersBelow} = separateWorkersOnOrder(id, location, algo, price),
         marketPosition = workersBelow / (workersAbove + workersBelow),
-        cheapestPriceAtLimit = (getCheapestFilledAtLimit(location, algo, limit_speed) || {}).price,
-        s = `[${printROI(roi)} ROI](${printCoin(coin)})[${printPrice(`B ${price}`)}|${printPrice(`B ${cheapestPriceAtLimit}`)}|${((price - cheapestPriceAtLimit) / cheapestPriceAtLimit * 100).toFixed(1)}%][${printLimit(limit_speed)} limit <B${printRate(limitProfitPerHour)}/hr>][${printSpeed((parseFloat(accepted_speed) * 1000))} MH/s <B${printRate(acceptedProfitPerHour)}/hr>][${workers} w (${(marketPosition * 100).toFixed(1)}%)][${renderProgress(1 - (avail / (avail + paid)))}] [${avail.toFixed(5)} avail] ${renderLocation(location)} ${id}`;
+        priceForLimit = (getPriceForLimit(location, algo, limit_speed, workers) || {price: 0}).price,
+        roiAtCheapest = calculateROI(coin, lastDifficulties[coin], stringToSatoshis(priceForLimit));
 
-  if (s != lastPrints[location][algo][id]) console.log(s);
+  const s = `|${renderProgress(1 - (avail / (avail + paid)))}| ${printROI(roi)} ROI [B ${printPrice(price)}|B ${printPrice(priceForLimit)}|${((price - priceForLimit) / priceForLimit * 100).toFixed(1)}% (${printROI(roiAtCheapest)} ROI)][${printLimit(limit_speed)} limit <B${printRate(limitProfitPerHour)}/hr>][${printSpeed((parseFloat(accepted_speed) * 1000))} MH/s <B${printRate(acceptedProfitPerHour)}/hr>][${printWorkers(workers)} w (${(marketPosition * 100).toFixed(1)}%)] [${avail.toFixed(5)} avail] ${id}`;
 
-  lastPrints[location][algo][id] = s;
+  return alive ? s : `${chalk.bgRed('D')}${s}`;
 }
 
 function printROI(roi) {
@@ -1220,17 +1680,19 @@ function printCoin(coin) {
   switch (coin) {
     case 'TRTL': return chalk.green(coin);
     case 'ETN': return chalk.blue(coin);
-    case 'STL': return chalk.magenta(coin);
+    case 'XTL': return chalk.magenta(coin);
     case 'DER': return chalk.cyan(coin);
     case 'MSR': return chalk.red(coin);
     case 'ITNS': return chalk.yellow(coin);
+    case 'GRFT': return chalk.bgBlue(coin);
     case 'BTC': return chalk.yellow(coin);
   }
   return coin;
 }
-function printPrice(price) { return chalk.yellow(price); }
+function printPrice(price) { return chalk.yellow(parseFloat(price).toFixed(4)); }
 function printRate(rate) { return chalk[rate < 0 ? 'red' : 'green'](rate.toFixed(4)); }
 function printSpeed(speed) { return chalk[speed > 0.01 ? 'blue' : 'grey'](speed.toFixed(2))}
+function printWorkers(workers) { return (workers > 0 ? chalk.bgGreen : chalk.bgRed)(workers); }
 
 
 function printLimit(limit) {
