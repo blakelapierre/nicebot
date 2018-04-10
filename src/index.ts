@@ -2,8 +2,11 @@ import {spawn} from 'child_process';
 import * as querystring from 'querystring';
 import * as EventEmitter from 'events';
 import * as https from 'https';
+import * as http from 'http';
 
 import * as nicehash from 'nicehash';
+
+import {g, p} from 'generator-trees';
 
 import chalk from 'chalk';
 
@@ -12,12 +15,48 @@ import {fetchUrl} from 'fetch';
 import {createAPI} from './apiInterfaces';
 import {start} from './server';
 
+EventEmitter['defaultMaxListeners'] = 25;
+
+const transform = function(obj, fn) {
+  return Object.keys(obj).reduce((t, key) => (t[key] = fn(obj[key]), t), {});
+};
+
 const broadcast = start();
 
 const apiId = process.env['API_ID'],
       apiKey = process.env['API_KEY'],
       TO_PUBLIC = process.env['TO_PUBLIC'],
       TO_PRIVATE = process.env['TO_PRIVATE'];
+
+const DEFAULT_EUR_COIN = 'MSR',
+      DEFAULT_USA_COIN = 'MSR';
+
+p.async(
+  2,
+
+);
+
+/*
+orders
+  roi
+  price
+  workers
+  accepted
+  limit
+  pool
+
+wallets
+  coin
+  balance
+
+pools
+  hashrate
+
+coins
+  roi
+  height
+  difficulty
+*/
 
 const nh = new nicehash({apiId, apiKey});
 
@@ -27,10 +66,191 @@ const {rpcWallet: xtlWallet, rpcDaemon: xtlDaemon, daemonGetInfo: xtlDaemonGetIn
 const {rpcWallet: etnWallet, rpcDaemon: etnDaemon, daemonGetInfo: etnDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 8888}, {host: '127.0.0.1', port: 8889});
 const {rpcWallet: msrWallet, rpcDaemon: msrDaemon, daemonGetInfo: msrDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9988}, {host: '127.0.0.1', port: 9989});
 const {rpcWallet: itnsWallet, rpcDaemon: itnsDaemon, daemonGetInfo: itnsDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9978}, {host: '127.0.0.1', port: 9979});
-const {rpcWallet: grftWallet, rpcDaemon: grftDaemon, daemonGetInfo: grftDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9968}, {host: '127.0.0.1', port: 9969});
+// const {rpcWallet: grftWallet, rpcDaemon: grftDaemon, daemonGetInfo: grftDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9968}, {host: '127.0.0.1', port: 9969});
+const {rpcWallet: grftWallet, rpcDaemon: grftDaemon, daemonGetInfo: grftDaemonGetInfo} = createAPI({host: '159.65.111.25', port: 9968}, {host: '127.0.0.1', port: 9969});
+const {rpcWallet: plrWallet, rpcDaemon: plrDaemon, daemonGetInfo: plrDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9958}, {host: '127.0.0.1', port: 9959});
+const {rpcWallet: xhvWallet, rpcDaemon: xhvDaemon, daemonGetInfo: xhvDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9948}, {host: '127.0.0.1', port: 9949});
+const {rpcWallet: xunWallet, rpcDaemon: xunDaemon, daemonGetInfo: xunDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9938}, {host: '127.0.0.1', port: 9939});
+const {rpcWallet: ipbcWallet, rpcDaemon: ipbcDaemon, daemonGetInfo: ipbcDaemonGetInfo} = createAPI({host: '127.0.0.1', port: 9928}, {host: '127.0.0.1', port: 9929});
+
+function getHighestROICoin() {
+  return Object
+          .keys(managedOrders)
+          .map(coin => ({coin, roi: calculateROI(coin, lastDifficulties[coin], stringToSatoshis('0.1'))})) // price doesn't matter for this calc...
+          .filter(({coin, roi}) => !isNaN(roi))
+          .sort((a, b) => a.roi > b.roi ? -1 : 1)
+          [0].coin;
+}
+
+const networkRewards = {
+  'TRTL': 29503,
+  'ETN': 6504,
+  'XTL': 18222.89,
+  'ITNS': 1416.41,
+  'MSR': 26.6099,
+  'PLURA': 1687,
+  'GRFT': 1741,
+  'XHV': 33.2909,
+  'XUN': 150,
+  'IPBC': 458
+};
+
+const unitPlaces = {
+  'TRTL': 2,
+  'ETN': 2,
+  'XTL': 2,
+  'ITNS': 2,
+  'MSR': 12,
+  'PLURA': 10,
+  'GRFT': 2,
+  'BTC': 8,
+  'XHV': 4,
+  'XUN': 6,
+  'IPBC': 8
+};
+
+const coinStatus = {
+  'TRTL': {selling: true},
+  'ETN': {selling: true},
+  'XTL': {selling: true},
+  'DER': {selling: false},
+  'MSR': {selling: false},
+  'ITNS': {selling: false},
+  'GRFT': {selling: true},
+  'PLURA': {selling: true},
+  'XHV': {selling: true},
+  'XUN': {selling: true},
+  'IPBC': {selling: false},
+  'BTC': {selling: false}
+};
+
+const exchanges = {
+  'tradeogre': {coins: ['TRTL', 'ETN', 'XTL', 'GRFT', 'PLURA', 'XHV', 'XUN', 'IPBC', 'BTC']},
+  'stocks.exchange': {coins: ['MSR', 'ITNS']},
+  'cryptopia': {coins: [/*'ETN'*/]},
+  'tradesatoshi': {coins: ['TRTL']}
+};
+
+const exchangePrices = {
+  'tradeogre': {'TRTL': {buy: 1}, 'XTL': {buy: 5}, 'ETN': {buy: 316}, 'GRFT': {buy: 272}, 'PLURA': {buy: 25}, 'XHV': {buy: 7401}, 'IPBC': {buy: 2042}, 'XUN': {buy: 37}},
+  'cryptopia': {},
+  'stocks.exchange': {'MSR': {buy: 2526},'ITNS': {buy: 63}},
+  'tradesatoshi': {'TRTL': {buy: 1}}
+};
+
+const {update: updateExchangePrice} = (
+  exchangePrices => ({
+    update(exchange, coin, buyPrice, sellPrice) {
+      exchangePrices[exchange][coin].buy = buyPrice;
+      exchangePrices[exchange][coin].sell = sellPrice;
+      broadcast(JSON.stringify(['exchange-prices', exchangePrices]));
+    }
+  })
+)(exchangePrices);
+
+const walletBalances = {
+  'TRTL': {coin: 'TRTL'},
+  'ETN': {coin: 'ETN'},
+  'XTL': {coin: 'XTL'},
+  'DER': {coin: 'DER'},
+  'ITNS': {coin: 'ITNS'},
+  'GRFT': {coin: 'GRFT'},
+  'MSR': {coin: 'MSR'},
+  'PLURA': {coin: 'PLURA'},
+  'XHV': {coin: 'XHV'},
+  'XUN': {coin: 'XUN'},
+  'IPBC': {coin: 'IPBC'},
+  'BTC': {coin: 'BTC'}
+};
+
+const {update: updateWalletBalance} = (
+  walletBalances => ({
+    update(name, coin, balances) {
+      // walletBalances[name] = Object.assign(walletBalances[name] || {coin}, balances);
+      walletBalances[name] = Object.assign(walletBalances[name] || {coin}, transform(balances, value => parseFloat(value || 0)));
+      broadcast(JSON.stringify(['wallet-balances', walletBalances]));
+    }
+  })
+)(walletBalances);
+
+const managedOrders = {'TRTL': [], 'ETN': [], 'XTL': [], 'ITNS': [], 'DER': [], 'MSR': [], 'GRFT': [], 'PLURA': [], 'XHV': [], 'XUN': [], 'IPBC': []};
+
+// mangageNiceHash({requests:{}});
+
+function mangageNiceHash({requests}, maxConcurrent = 2) {
+  // p.async(maxConcurrent, g.map(g.toGenerator([1, 2, 3]), n => new Promise((resolve, reject) => resolve(n))), (result, count) => console.log({result, count}));
+}
 
 
-const ordersDB = ['TRTL', 'ETN', 'XTL', 'DER', 'MSR', 'ITNS', 'GRFT', 'unknown'].reduce((db, coin) => (db[coin] = {'0': {22: {}}, '1': {22: {}}}, db), {});
+const proxyHosts = {
+  'eur': 'localhost',
+  'usa': 'localhost'
+};
+
+const proxyPorts = {
+  'eur': 45567,
+  'usa': 45566
+};
+
+function setProxyCoin(pool_user, coin) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({pool_user, coin});
+
+    const request = http.request({
+      host: proxyHosts[pool_user],
+      port: proxyPorts[pool_user],
+      method: 'POST',
+      path: '/user/coin',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': body.length
+      }
+    }, response => {
+      let result = '';
+      response.on('data', chunk => result += chunk);
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(result));
+        }
+        catch (error) {return reject(error);}
+      });
+      response.on('error', reject);
+    });
+
+    request.on('error', reject);
+
+    request.write(body);
+    request.end();
+  });
+}
+
+function getCoinFromPoolUser(pool_user) {
+  if (pool_user === 'eur' || pool_user === 'usa') {
+    const coin = pool_user === 'eur' ? DEFAULT_EUR_COIN : DEFAULT_USA_COIN;
+
+    setProxyCoin(pool_user, coin)
+      .then(result => console.log(pool_user, 'proxy set to', coin))
+      .catch(error => console.error('error setting', pool_user, 'proxy to', coin, error));
+
+    return coin;
+  }
+
+  switch (pool_user) {
+    case 'etnk1FzHAgEH2p15Usyzy5UhYocszGggwFaHE6k8Z1ZSBE4kww7azLkT3qgVFgKn5LaVxV9NRssPu5PsWLtJteZw9v6yhMEVRA.600000': return 'ETN';
+    case '5iJjH9UH36SgL367R3F6WD638qQmeRyWrEXFnTKURLtZW196MdueJ6TJnJJN4PEnRhM6au2QYRLdmNoyta2Qwax71irJXuU.600000': return 'MSR';
+    case 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR.600000': return 'TRTL';
+    case 'GMPHYf5KRkcAyik7Jw9oHRfJtUdw2Kj5f4VTFJ25AaFVYxofetir8Cnh7S76Q854oMXzwaguL8p5KEz1tm3rn1SA6ntd2X7G1ZENVN6Sdh+600000': return 'GRFT';
+    case 'iz44v9Cs9XtPAXqdTwAbQPBMNqQWhY1ns77imdefBk641UfEsVN8zLqAFjrtHbaMv1TygTcvJWzGN3zNR6PeEYuc1w8UuQafE.745d0a1a35ba0813fb28d39585698613a31ee26d0921621f40797823f18f2adf+600000': return 'ITNS';
+
+    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy':
+    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy.600000': return 'XTL';
+
+  }
+}
+
+
+const orderDB = ['0', '1'].reduce((db, location) => (db[location] = {22: {}}, db), {});
+const ordersDB = ['TRTL', 'ETN', 'XTL', 'DER', 'MSR', 'ITNS', 'GRFT', 'PLURA', 'XHV', 'XUN', 'IPBC', 'unknown'].reduce((db, coin) => (db[coin] = {'0': {22: {}}, '1': {22: {}}}, db), {});
 
 const pools = {
   'TRTL': [
@@ -52,36 +272,31 @@ const poolStatus = {
   '165.227.43.9': undefined
 };
 
-const networkRewards = {
-  'TRTL': 29650,
-  'ETN': 6795,
-  'XTL': 18535,
-  'ITNS': 1450,
-  'MSR': 27.24,
-  'GRFT': 1781.52
-};
-
 const limitFn = {
   'TRTL': calculateTRTLLimit,
   'ETN': calculateETNLimit,
   'XTL': calculateXTLLimit,
   'MSR': calculateMSRLimit,
   'ITNS': calculateITNSLimit,
-  'GRFT': calculateGRFTLimit
+  'GRFT': calculateGRFTLimit,
+  'PLURA': calculatePLURALimit,
+  'XHV': calculateXHVLimit,
+  'XUN': calculateXUNLimit,
+  'IPBC': calculateIPBCLimit
 };
 
-const lowerThreshold = 0.2;
+const trtlLowerThreshold = 0.35;
 function calculateTRTLLimit(roi) {
-  if (roi < lowerThreshold) return 0.01;
-  else if (roi < 1.5) return (1 + /*0.5 + */((roi - lowerThreshold) / 0.1) * 0.3) / managedOrders['TRTL'].length;
+  if (roi < trtlLowerThreshold) return 0.01;
+  else if (roi < 1.5) return (0.5 + /*0.5 + */((roi - trtlLowerThreshold) / 0.1) * 0.25) / (managedOrders['TRTL'].filter(({coin, location, algo, order}) => (ordersDB[coin][location][algo][order] || {workers: 0}).workers > 100).length || 1);
   return 0;
 }
 
-const xtlLowerThreshold = 0.2;
+const xtlLowerThreshold = 0.5;
 function calculateXTLLimit(roi) {
   if (roi < xtlLowerThreshold) return 0.01;
   // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 1) return (1 + /*0.5 + */((roi - lowerThreshold) / 0.1) * 1) / managedOrders['XTL'].length;
+  else if (roi < 1) return (2.5 + /*0.5 + */((roi - xtlLowerThreshold) / 0.1) * 1) / (managedOrders['XTL'].filter(({coin, location, algo, order}) => (ordersDB[coin][location][algo][order] || {workers: 0}).workers > 100).length || 1);
   return 5;
 }
 
@@ -89,33 +304,66 @@ const etnLowerThreshold = 0.2;
 function calculateETNLimit(roi) {
   if (roi < etnLowerThreshold) return 0.01;
   // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (12 + /*0.5 + */((roi - etnLowerThreshold) / 0.1) * 3) / managedOrders['ETN'].filter(({coin, location, algo, order}) => ordersDB[coin][location][algo][order].workers > 0).length;
+  else if (roi < 2.4) return (2 + /*0.5 + */((roi - etnLowerThreshold) / 0.1) * 1) / (managedOrders['ETN'].filter(({coin, location, algo, order}) => (ordersDB[coin][location][algo][order] || {workers: 0}).workers > 100).length || 1);
   return 0;
 }
 
-const msrLowerThreshold = 0.2;
+const msrLowerThreshold = 0.3;
 function calculateMSRLimit(roi) {
   if (roi < msrLowerThreshold) return 0.01;
   // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (0.5 + /*0.5 + */((roi - msrLowerThreshold) / 0.1) * 0.35) / managedOrders['MSR'].length;
+  else if (roi < 2.4) return (1 + /*0.5 + */((roi - msrLowerThreshold) / 0.1) * 1.5) / (managedOrders['MSR'].filter(({coin, location, algo, order}) => (ordersDB[coin][location][algo][order] || {workers: 0}).workers > 100).length || 1);
   return 0;
 }
 
-const itnsLowerThreshold = 0.2;
+const itnsLowerThreshold = 0.4;
 function calculateITNSLimit(roi) {
   if (roi < itnsLowerThreshold) return 0.01;
   // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (1 + /*0.5 + */((roi - itnsLowerThreshold) / 0.1) * 3) / managedOrders['ITNS'].length;
+  else if (roi < 2.4) return (1 + /*0.5 + */((roi - itnsLowerThreshold) / 0.1) * 0.5) / (managedOrders['ITNS'].filter(({coin, location, algo, order}) => (ordersDB[coin][location][algo][order] || {workers: 0}).workers > 100).length || 1);
   return 0;
 }
 
-const grftLowerThreshold = 0.2;
+const grftLowerThreshold = 0.3;
 function calculateGRFTLimit(roi) {
   if (roi < grftLowerThreshold) return 0.01;
   // else if (roi < 2.4) return roi - 0.1;
-  else if (roi < 2.4) return (10 + /*0.5 + */((roi - grftLowerThreshold) / 0.1) * 3) / managedOrders['ITNS'].length;
+  else if (roi < 2.4) return (2 + /*0.5 + */((roi - grftLowerThreshold) / 0.1) * 2.5) / (managedOrders['GRFT'].filter(({coin, location, algo, order}) => (ordersDB[coin][location][algo][order] || {workers: 0}).workers > 50).length || 1);
   return 0;
 }
+
+const pluraLowerThreshold = 0.3;
+function calculatePLURALimit(roi) {
+  if (roi < pluraLowerThreshold) return 0.01;
+  // else if (roi < 2.4) return roi - 0.1;
+  else if (roi < 2.4) return (2 + /*0.5 + */((roi - pluraLowerThreshold) / 0.1) * 1.5) / (managedOrders['PLURA'].filter(({coin, location, algo, order}) => (ordersDB[coin][location][algo][order] || {workers: 0}).workers > 50).length || 1);
+  return 6;
+}
+
+const xhvLowerThreshold = 0.5;
+function calculateXHVLimit(roi) {
+  if (roi < xhvLowerThreshold) return 0.01;
+  // else if (roi < 2.4) return roi - 0.1;
+  else if (roi < 2.4) return (1 + /*0.5 + */((roi - xhvLowerThreshold) / 0.1) * 0.35) / (managedOrders['XHV'].filter(({coin, location, algo, order}) => (ordersDB[coin][location][algo][order] || {workers: 0}).workers > 50).length || 1);
+  return 5;
+}
+
+const xunLowerThreshold = 0.3;
+function calculateXUNLimit(roi) {
+  if (roi < xunLowerThreshold) return 0.01;
+  // else if (roi < 2.4) return roi - 0.1;
+  else if (roi < 2.4) return (0.25 + /*0.5 + */((roi - xunLowerThreshold) / 0.1) * 0.15) / (managedOrders['XUN'].filter(({coin, location, algo, order}) => (ordersDB[coin][location][algo][order] || {workers: 0}).workers > 50).length || 1);
+  return 1;
+}
+
+const ipbcLowerThreshold = 0.21;
+function calculateIPBCLimit(roi) {
+  if (roi < ipbcLowerThreshold) return 0.01;
+  // else if (roi < 2.4) return roi - 0.1;
+  else if (roi < 2.4) return (1 + /*0.5 + */((roi - ipbcLowerThreshold) / 0.1) * 0.35) / (managedOrders['XUN'].filter(({coin, location, algo, order}) => (ordersDB[coin][location][algo][order] || {workers: 0}).workers > 50).length || 1);
+  return 5;
+}
+
 
 const poolStopFn = {
   'TRTL': ({roi}) => roi < -0.1,
@@ -123,7 +371,11 @@ const poolStopFn = {
   'XTL': ({roi}) => false,
   'MSR': ({roi}) => false,
   'ITNS': ({roi}) => false,
-  'GRFT': ({roi}) => false
+  'GRFT': ({roi}) => false,
+  'PLURA': ({roi}) => false,
+  'XUN': ({roi}) => false,
+  'IPBC': ({roi}) => false,
+  'XHV': ({roi}) => false
 };
 
 const poolStartFn = {
@@ -132,7 +384,11 @@ const poolStartFn = {
   'XTL': ({roi}) => false,
   'MSR': ({roi}) => false,
   'ITNS': ({roi}) => false,
-  'GRFT': ({roi}) => false
+  'GRFT': ({roi}) => false,
+  'PLURA': ({roi}) => false,
+  'XUN': ({roi}) => false,
+  'IPBC': ({roi}) => false,
+  'XHV': ({roi}) => false
 };
 
 const difficultiesErrorCount = {
@@ -142,7 +398,11 @@ const difficultiesErrorCount = {
   'DER': 0,
   'MSR': 0,
   'ITNS': 0,
-  'GRFT': 0
+  'GRFT': 0,
+  'PLURA': 0,
+  'XUN': 0,
+  'IPBC': 0,
+  'XHV': 0
 };
 
 const lastDifficulties = {
@@ -152,7 +412,11 @@ const lastDifficulties = {
   'DER': undefined,
   'MSR': undefined,
   'ITNS': undefined,
-  'GRFT': undefined
+  'GRFT': undefined,
+  'PLURA': undefined,
+  'XUN': undefined,
+  'IPBC': undefined,
+  'XHV': undefined
 };
 
 const lastBlocks = {
@@ -162,7 +426,11 @@ const lastBlocks = {
   'DER': 0,
   'MSR': 0,
   'ITNS': 0,
-  'GRFT': 0
+  'GRFT': 0,
+  'PLURA': 0,
+  'XUN': 0,
+  'IPBC': 0,
+  'XHV': 0
 };
 
 const lastHeights = {
@@ -172,7 +440,11 @@ const lastHeights = {
   'DER': 0,
   'MSR': 0,
   'ITNS': 0,
-  'GRFT': 0
+  'GRFT': 0,
+  'PLURA': 0,
+  'XUN': 0,
+  'IPBC': 0,
+  'XHV': 0
 };
 
 const currentExchange = {
@@ -182,62 +454,32 @@ const currentExchange = {
   'DER': 'cryptopia',
   'MSR': 'stocks.exchange',
   'ITNS': 'stocks.exchange',
-  'GRFT': 'tradeogre'
+  'GRFT': 'tradeogre',
+  'PLURA': 'tradeogre',
+  'XUN': 'tradeogre',
+  'IPBC': 'tradeogre',
+  'XHV': 'tradeogre'
 };
 
 const pricingStrategies = {
-  'TRTL': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
+  'TRTL': ({price}) => price,
+  // 'TRTL': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
   'ETN': ({price}) => price,
   // 'ETN': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
   'XTL': ({price}) => price,
     // 'XTL': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
   'DER': ({price}) => price,
-  // 'MSR': ({price}) => price,
-  'MSR': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
-  'ITNS': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
-  // 'ITNS': ({price}) => price,
-  'GRFT': ({price}) => price
+  'MSR': ({price}) => price,
+  // 'MSR': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
+  // 'ITNS': ({location, algo, newLimit, workers}) => (stringToSatoshis((getPriceForLimit(location, algo, newLimit, workers) || {price: 0}).price) + 20000),
+  'ITNS': ({price}) => price,
+  'GRFT': ({price}) => price,
+  'PLURA': ({price}) => price,
+  'XUN': ({price}) => price,
+  'IPBC': ({price}) => price,
+  'XHV': ({price}) => price
 };
 
-
-
-const exchanges = {
-  'tradeogre': {coins: ['TRTL', 'ETN', 'XTL', 'GRFT', 'BTC']},
-  'stocks.exchange': {coins: ['MSR', 'ITNS']},
-  'cryptopia': {coins: [/*'ETN'*/]},
-  'tradesatoshi': {coins: ['TRTL']}
-};
-
-const exchangePrices = {
-  'tradeogre': {},
-  'cryptopia': {},
-  'stocks.exchange': {'MSR':1550,'ITNS':55},
-  'tradesatoshi': {}
-};
-
-const coinStatus = {
-  'TRTL': {selling: true},
-  'ETN': {selling: true},
-  'XTL': {selling: true},
-  'DER': {selling: false},
-  'MSR': {selling: false},
-  'ITNS': {selling: false},
-  'GRFT': {selling: true},
-  'BTC': {selling: false}
-};
-
-const walletBalances = {
-  'TRTL': {},
-  'ETN': {},
-  'XTL': {},
-  'DER': {},
-  'ITNS': {},
-  'GRFT': {},
-  'BTC': {},
-  'nicehash': {}
-};
-
-const managedOrders = {'TRTL': [], 'ETN': [], 'XTL': [], 'ITNS': [], 'DER': [], 'MSR': [], 'GRFT': []};
 
 
 const latestOrders = {
@@ -262,7 +504,11 @@ const difficultyEmitters = {
         'XTL': new EventEmitter(),
         'MSR': new EventEmitter(),
         'ITNS': new EventEmitter(),
-        'GRFT': new EventEmitter()
+        'GRFT': new EventEmitter(),
+        'PLURA': new EventEmitter(),
+        'XUN': new EventEmitter(),
+        'IPBC': new EventEmitter(),
+        'XHV': new EventEmitter()
       },
       cheapestEmitter = new EventEmitter();
 
@@ -311,13 +557,35 @@ const checkDifficulty = (getDifficulty, coin) => {
 
 const checkITNSDifficulty = () => checkDifficulty(() => getDifficulty(itnsDaemonGetInfo), 'ITNS');
 const checkGRFTDifficulty = () => checkDifficulty(() => getDifficulty(grftDaemonGetInfo), 'GRFT');
+const checkPLRDifficulty = () => checkDifficulty(() => getDifficulty(plrDaemonGetInfo), 'PLURA');
+const checkXHVDifficulty = () => checkDifficulty(() => getDifficulty(xhvDaemonGetInfo), 'XHV');
+const checkXUNDifficulty = () => checkDifficulty(() => getDifficulty(xunDaemonGetInfo), 'XUN');
+const checkIPBCDifficulty = () => checkDifficulty(() => getDifficulty(ipbcDaemonGetInfo), 'IPBC');
 
-runAndSchedule(checkTRTLDifficulty, 1 * 500);
+// runAndSchedule(checkTRTLDifficulty, 1 * 500);
 runAndSchedule(checkEtnDifficulty, 1 * 500);
 // runAndSchedule(checkXTLDifficulty, 2 * 500);
 runAndSchedule(checkMSRDifficulty, 2 * 500);
-runAndSchedule(checkITNSDifficulty, 2 * 500);
+runAndSchedule(checkPLRDifficulty, 2 * 500);
+// runAndSchedule(checkXHVDifficulty, 2 * 500);
+// runAndSchedule(checkITNSDifficulty, 2 * 500);
 runAndSchedule(checkGRFTDifficulty, 2 * 500);
+runAndSchedule(checkXUNDifficulty, 2 * 500);
+runAndSchedule(checkIPBCDifficulty, 2 * 500);
+
+
+Promise
+  .all(['ETN', 'MSR', 'PLURA'].map(coin => new Promise((resolve, reject) => difficultyEmitters[coin].once('difficulty', resolve))))
+  .then(() => {
+    runAndSchedule(() => updateOrdersStats(0, algo), 10 * 1000);
+    runAndSchedule(() => updateOrdersStats(1, algo), 10 * 1000);
+
+    getAndManageOrders(0, 22);
+    getAndManageOrders(1, 22);
+  });
+
+
+
 // runAndSchedule(checkTRTLPrice, 30 * 1000);
 runAndSchedule(checkTRTLPrice, 30 * 1000);
 runAndSchedule(checkTRTLTradeSatoshiPrice, 30 * 1000);
@@ -325,6 +593,10 @@ runAndSchedule(checkETNPrice, 30 * 1000);
 runAndSchedule(checkGRFTPrice, 30 * 1000);
 // runAndSchedule(checkETNCryptopiaPrice, 30 * 1000);
 runAndSchedule(checkXTLPrice, 30 * 1000);
+runAndSchedule(checkPLURAPrice, 30 * 1000);
+runAndSchedule(checkXHVPrice, 30 * 1000);
+runAndSchedule(checkXUNPrice, 30 * 1000);
+runAndSchedule(checkIPBCPrice, 30 * 1000);
 runAndSchedule(checkMSRPrice, 30 * 1000);
 runAndSchedule(checkITNSPrice, 30 * 1000);
 
@@ -335,17 +607,26 @@ function checkETNPrice() { return checkTradeOgrePrice('ETN').catch(error => cons
 function checkETNCryptopiaPrice() { return checkCryptopiaPrice('ETN').catch(error => console.error('Error fetching ETN price', error)); }
 function checkGRFTPrice() { return checkTradeOgrePrice('GRFT').catch(error => console.error('Error fetching GRFT price', error)); }
 function checkXTLPrice() { return checkTradeOgrePrice('XTL').catch(error => console.error('Error fetching XTL price', error)); }
+function checkPLURAPrice() { return checkTradeOgrePrice('PLURA').catch(error => console.error('Error fetching PLURA price', error)); }
+function checkXHVPrice() { return checkTradeOgrePrice('XHV').catch(error => console.error('Error fetching XHV price', error)); }
+function checkXUNPrice() { return checkTradeOgrePrice('XUN').catch(error => console.error('Error fetching XUN price', error)); }
+function checkIPBCPrice() { return checkTradeOgrePrice('IPBC').catch(error => console.error('Error fetching IPBC price', error)); }
 function checkMSRPrice() { return checkStocksExchangePrice('MSR').catch(error => console.error('Error fetching MSR price', error)); }
 function checkITNSPrice() { return checkStocksExchangePrice('ITNS').catch(error => console.error('Error fetching ITNS price', error)); }
 
 setTimeout(() => {
   // runAndSchedule(transferWalletToTradeOgre, 60 * 1000);
-  runAndSchedule(transferTRTLWallet, 60 * 1000);
+  // runAndSchedule(transferTRTLWallet, 60 * 1000);
   // runAndSchedule(transferWalletToTradeSatoshi, 60 * 1000);
-  runAndSchedule(transferStelliteWalletToTradeOgre, 60 * 1000);
-  // runAndSchedule(transferEtnWalletToTradeOgre, 60 * 1000);
+  // runAndSchedule(transferXHVWallet, 60 * 1000);
+  runAndSchedule(transferPLURAWalletToTradeOgre, 60 * 1000);
+  runAndSchedule(transferXUNWalletToTradeOgre, 60 * 1000);
+  runAndSchedule(transferIPBCWalletToTradeOgre, 60 * 1000);
+  runAndSchedule(transferEtnWalletToTradeOgre, 60 * 1000);
+  runAndSchedule(transferMsrWalletToStocksExchange, 60 * 1000);
+  // runAndSchedule(transferStelliteWalletToTradeOgre, 60 * 1000);
+  // runAndSchedule(transferEtnWalletToKucoin, 60 * 1000);
   // runAndSchedule(transferEtnWalletToCryptopia, 60 * 1000);
-  // runAndSchedule(transferMsrWalletToStocksExchange, 60 * 1000);
   // runAndSchedule(transferEtnWallet, 60 * 1000);
 }, 5 * 1000);
 
@@ -379,13 +660,17 @@ function checkTradeOgreBalances() {
   exchanges['tradeogre'].coins.forEach(coin => {
     getTradeOgreBalance(coin)
       .then(({balance, available}) => {
-        console.log(`${chalk.blue('tradeogre')} ${printCoin(coin)} balance ${balance}, available ${parseFloat(available) > 0 ? chalk.yellow(available) : available}`);
+        // console.log(`${chalk.blue('tradeogre')} ${printCoin(coin)} balance ${balance}, available ${parseFloat(available) > 0 ? chalk.yellow(available) : available}`);
+
+        // walletBalances[`tradeogre-${coin}`] = Object.assign(walletBalances[`tradeogre-${coin}`] || {}, {balance});
+        if (coin === 'BTC') updateWalletBalance(`tradeogre-${coin}`, coin, {balance: balance});
+        else updateWalletBalance(`tradeogre-${coin}`, coin, {balance});
 
         if (coinStatus[coin].selling) {
 
           const higher = parseFloat(available) * 0.2,
-                basePrice = exchangePrices['tradeogre'][coin],
-                higherPrice = basePrice + 1;
+                basePrice = exchangePrices['tradeogre'][coin].buy,
+                higherPrice = exchangePrices['tradeogre'][coin].sell;
 
           let lower = parseFloat(available);
 
@@ -472,7 +757,7 @@ function checkNiceHashBalance() {
       const {balance_confirmed: confirmed, balance_pending: pending} = response.body.result,
             total = stringToSatoshis(confirmed) + stringToSatoshis(pending);
 
-      Object.assign(walletBalances['nicehash'], {confirmed, pending, total: total / 100000000});
+      updateWalletBalance('nicehash-BTC', 'BTC', {balance: total / Math.pow(10, unitPlaces['BTC']), available: confirmed / Math.pow(10, unitPlaces['BTC'])});
 
       printInfo();
     })
@@ -505,132 +790,385 @@ const collectors = [
 const collectorAmount = 1;
 
 
+const checkWalletBalance = {
+  'XTL': () => new Promise((resolve, reject) => {
+    const wallet = xtlWallet;
+
+    wallet('getbalance', {}, (error, response) => {
+      if (error) return reject(error);
+
+      const {balance, unlocked_balance} = response;
+
+      // Object.assign(walletBalances['XTL'], {balance, unlocked_balance});
+      updateWalletBalance('XTL', 'XTL', {balance: balance / Math.pow(10, unitPlaces['XTL']), unlocked_balance: unlocked_balance / Math.pow(10, unitPlaces['XTL'])});
+
+      resolve({balance, available: unlocked_balance});
+    });
+  }),
+
+  'TRTL': () => new Promise((resolve, reject) => {
+    const wallet = trtlWallet;
+
+    trtlWallet('getBalance', {'address': 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR'}, (error, response) => {
+
+      if (error) return reject(error);
+
+      const {availableBalance, lockedAmount} = response,
+            total = availableBalance + lockedAmount;
+
+      // Object.assign(walletBalances['TRTL'], {balance: total, available: availableBalance});
+      updateWalletBalance('TRTL', 'TRTL', {balance: total / Math.pow(10, unitPlaces['TRTL']), available: availableBalance / Math.pow(10, unitPlaces['TRTL'])});
+
+      resolve({balance: total, available: availableBalance});
+    });
+  }),
+
+  'MSR': () => new Promise((resolve, reject) => {
+    const wallet = msrWallet;
+
+    wallet('getbalance', {}, (error, response) => {
+      if (error) return reject(error);
+
+      const {balance, unlocked_balance: available} = response;
+
+      // Object.assign(walletBalances['MSR'], {balance, available});
+      updateWalletBalance('MSR', 'MSR', {balance: balance / Math.pow(10, unitPlaces['MSR']), available: available / Math.pow(10, unitPlaces['MSR'])});
+
+      resolve({balance, available});
+    });
+  }),
+
+  'ETN': () => new Promise((resolve, reject) => {
+    const wallet = etnWallet;
+
+    wallet('getbalance', {}, (error, response) => {
+      if (error) return reject(error);
+
+      const {balance, unlocked_balance: available} = response;
+
+      // Object.assign(walletBalances['ETN'], {balance, available});
+      updateWalletBalance('ETN', 'ETN', {balance: balance / Math.pow(10, unitPlaces['ETN']), available: available / Math.pow(10, unitPlaces['ETN'])});
+
+      resolve({balance, available});
+    });
+  }),
+
+  'PLURA': () => new Promise((resolve, reject) => {
+    const wallet = plrWallet;
+
+    wallet('getBalance', {}, (error, response) => {
+      if (error) return reject(error);
+
+      const {lockedAmount, availableBalance: available} = response,
+            balance = lockedAmount + available;
+
+      // Object.assign(walletBalances['ETN'], {balance, available});
+      updateWalletBalance('PLURA', 'PLURA', {balance: balance / Math.pow(10, unitPlaces['PLURA']), available: available / Math.pow(10, unitPlaces['PLURA'])});
+
+      resolve({balance, available});
+    });
+  }),
+
+  'XUN': () => new Promise((resolve, reject) => {
+    const wallet = xunWallet;
+
+    wallet('getBalance', {}, (error, response) => {
+
+      console.log('%%%%%%%%%%%%%%% xun balance', error, response);
+      if (error) return reject(error);
+
+      const {lockedAmount, availableBalance: available} = response,
+            balance = lockedAmount + available;
+
+      updateWalletBalance('XUN', 'XUN', {balance: balance / Math.pow(10, unitPlaces['XUN']), available: available / Math.pow(10, unitPlaces['XUN'])});
+
+      resolve({balance, available});
+    });
+  }),
+
+  'IPBC': () => new Promise((resolve, reject) => {
+    const wallet = ipbcWallet;
+
+    wallet('getBalance', {}, (error, response) => {
+
+      console.log('%%%%%%%%%%%%%%% IPBC balance', error, response);
+      if (error) return reject(error);
+
+      const {lockedAmount, availableBalance: available} = response,
+            balance = lockedAmount + available;
+
+      updateWalletBalance('IPBC', 'IPBC', {balance: balance / Math.pow(10, unitPlaces['IPBC']), available: available / Math.pow(10, unitPlaces['IPBC'])});
+
+      resolve({balance, available});
+    });
+  })
+};
+
 function transferStelliteWalletToTradeOgre() {
-  const wallet = xtlWallet;
+  checkWalletBalance['XTL']()
+    .then(({balance, available}) => {
+      if (available / 100 > 1000) {
+        const wallet = xtlWallet;
 
-  wallet('getbalance', {}, (error, response) => {
-    if (error) return console.error('error getting stellite balance', error);
+        wallet('sweep_all', {
+          'address': 'SEiStP7SMy1bvjkWc9dd1t2v1Et5q2DrmaqLqFTQQ9H7JKdZuATcPHUbUL3bRjxzxTDYitHsAPqF8EeCLw3bW8ARe8rYeorMw6p7nhasUgZ6S',
+          'mixin': 1,
+          'priority': 3,
+          'unlock_time': 0
+        }, (error, response) => {
+          if (error) return console.error('error sweeping stellite wallet', error, response);
 
-    const {balance, unlocked_balance} = response;
-
-    Object.assign(walletBalances['XTL'], {balance, unlocked_balance});
-
-    // console.log(`${chalk.green('$$$$$$$$$$$$')} ${printCoin('XTL')} Wallet Balance: ${(unlocked_balance/100).toFixed(2)} available ||| ${chalk.green((balance / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
-
-    if (unlocked_balance/100 > 1000) {
-      // wallet('transfer', {
-      //   'mixin': 1,
-      //   'unlock_time': 0,
-      //   destinations: [{
-      //     'address': 'SEiStP7SMy1bvjkWc9dd1t2v1Et5q2DrmaqLqFTQQ9H7JKdZuATcPHUbUL3bRjxzxTDYitHsAPqF8EeCLw3bW8ARe8rYeorMw6p7nhasUgZ6S',
-      //     'amount': unlocked_balance - 1000
-      //   }]
-      // }, (error, response) => {
-      //   if (error) return console.error('error transfering stellite wallet', error);
-
-      //   console.log('stellite transfer response', response);
-      // });
-      wallet('sweep_all', {
-        'address': 'SEiStP7SMy1bvjkWc9dd1t2v1Et5q2DrmaqLqFTQQ9H7JKdZuATcPHUbUL3bRjxzxTDYitHsAPqF8EeCLw3bW8ARe8rYeorMw6p7nhasUgZ6S',
-        'mixin': 1,
-        'priority': 3,
-        'unlock_time': 0
-      }, (error, response) => {
-        if (error) return console.error('error sweeping stellite wallet', error, response);
-
-        if (response.tx_hash_list) console.log('swept stellite wallet', 'tx ids', response.tx_hash_list);
-      });
-    }
-  });
-
-
+          if (response.tx_hash_list) console.log('swept stellite wallet', 'tx ids', response.tx_hash_list);
+        });
+      }
+    })
+    .catch(error => console.error('error transferring stellite wallet', error))
 }
 
 function transferEtnWalletToTradeOgre() {
-  const wallet = etnWallet;
+  checkWalletBalance['ETN']()
+    .then(({balance, available}) => {
+      if (available / 100 > 100) {
+        const wallet = etnWallet;
 
-  wallet('sweep_all', {
-    'address': 'f4VR74XR616Tw2wAMMfaLV1vmYBSBBbmWXBUtaV8YDb6DHsfKRoYkFaCvhPhsGDDfm1afhzLNuf5XGFmNrvodPoQ6m4qLBtqrK15ZQg4neRYH',
-    'mixin': 1,
-    'unlock_time': 0
-  }, (error, response) => {
-    if (error) return console.error('error sweeping etn wallet', error);
+        wallet('sweep_all', {
+          'address': 'f4VR74XR616Tw2wAMMfaLV1vmYBSBBbmWXBUtaV8YDb6DHsfKRoYkFaCvhPhsGDDfm1afhzLNuf5XGFmNrvodPoQ6m4qLBtqrK15ZQg4neRYH',
+          'mixin': 1,
+          'unlock_time': 0
+        }, (error, response) => {
+          if (error) return console.error('error sweeping etn wallet', error);
 
-    if (response) console.log('swept etn wallet', 'tx ids', response.tx_hash_list);
-  });
+          if (response) console.log('swept etn wallet', 'tx ids', response.tx_hash_list);
+        });
+      }
+    })
+    .catch(error => console.error('error transfering etn wallet', error));
+}
+
+function transferEtnWalletToKucoin() {
+  checkWalletBalance['ETN']()
+    .then(({balance, available}) => {
+      if (available / 100 > 100) {
+        const wallet = etnWallet;
+
+        wallet('sweep_all', {
+          'address': 'etnjvMPvGM68TZp59KDfWvQoNS7NFaEc9296CK4pSrfA4j5KgTguz5sZNEwC2KMW6iEn8gML7vASrT3gLxD3n9zs3M2PxMYVyH ',
+          'payment_id': '00000000000000000000000000000000000000005aaf7571a57c5708e0d192aa',
+          'mixin': 1,
+          'unlock_time': 0
+        }, (error, response) => {
+          if (error) return console.error('error sweeping etn wallet', error);
+
+          if (response) console.log('swept etn wallet', 'tx ids', response.tx_hash_list);
+        });
+      }
+    })
+    .catch(error => console.error('error transfering etn wallet', error));
 }
 
 function transferEtnWalletToCryptopia() {
-  const wallet = etnWallet;
+  // cryptopia etn wallet down!!
+  // const wallet = etnWallet;
 
-  wallet('sweep_all', {
-    'address': 'etnjzKFU6ogESSKRZZbdqraPdcKVxEC17Cm1Xvbyy76PARQMmgrgceH4krAH6xmjKwJ3HtSAKuyFm1BBWYqtchtq9tBap8Qr4M',
-    'payment_id': '8ce7f9034e40f81f18fcb35110cf74743d730cb0d5c076c14e0676caee0dd24b',
-    'mixin': 1,
-    'unlock_time': 0
-  }, (error, response) => {
-    if (error) return console.error('error sweeping etn wallet', error, response);
+  // wallet('sweep_all', {
+  //   'address': 'etnjzKFU6ogESSKRZZbdqraPdcKVxEC17Cm1Xvbyy76PARQMmgrgceH4krAH6xmjKwJ3HtSAKuyFm1BBWYqtchtq9tBap8Qr4M',
+  //   'payment_id': '8ce7f9034e40f81f18fcb35110cf74743d730cb0d5c076c14e0676caee0dd24b',
+  //   'mixin': 1,
+  //   'unlock_time': 0
+  // }, (error, response) => {
+  //   if (error) return console.error('error sweeping etn wallet', error, response);
 
-    if (response) console.log('swept etn wallet', 'tx ids', response.tx_hash_list);
-  });
+  //   if (response) console.log('swept etn wallet', 'tx ids', response.tx_hash_list);
+  // });
 }
 
 function transferMsrWalletToStocksExchange() {
-  const wallet = msrWallet;
+  checkWalletBalance['MSR']()
+    .then(({balance, available}) => {
+      if (available / 100 >  100) {
+        const wallet = msrWallet;
 
-  wallet('sweep_all', {
-    'address': '5pc8m5HPJtEH8kuVH8eGgnSSuqYQXaPpTHYtxpbymrADCAXYt8xExSM55hi7bHvuCrYSDCYpM2XQkYTvoVupvqi6ASsX3AN',
-    'payment_id': '6327c308515b691b232d67994f982275673a087f6b16769e3196334f3a71cc3f',
-    'mixin': 1,
-    'unlock_time': 0
-  }, (error, response) => {
-    if (error) return console.error('error sweeping msr wallet', error, response);
+        wallet('sweep_all', {
+          'address': '5pc8m5HPJtEH8kuVH8eGgnSSuqYQXaPpTHYtxpbymrADCAXYt8xExSM55hi7bHvuCrYSDCYpM2XQkYTvoVupvqi6ASsX3AN',
+          'payment_id': '6327c308515b691b232d67994f982275673a087f6b16769e3196334f3a71cc3f',
+          'mixin': 1,
+          'unlock_time': 0
+        }, (error, response) => {
+          if (error) return console.error('error sweeping msr wallet', error, response);
 
-    if (response) console.log('swept msr wallet', 'tx ids', response.tx_hash_list);
-  });
+          if (response) console.log('swept msr wallet', 'tx ids', response.tx_hash_list);
+        });
+      }
+    })
+    .catch(error => console.error(error));
+}
+
+function transferPLURAWalletToTradeOgre() {
+  checkWalletBalance['PLURA']()
+    .then(({balance, available}) => {
+      if (available / Math.pow(10, unitPlaces['PLURA']) >  100) {
+        const wallet = plrWallet;
+        const fee = 100000000;
+
+        wallet('sendTransaction', {
+          'paymentId': 'e73735fdca4cd8ba0acc779e9b6d7699e625077d5c5aef74a3fbdef077a20d83',
+          'sourceAddresses': ['Pv7ydx95p4Y11ZQaZGKMxGgrSQ9bLCarCGfdYxxDNawJacZrmFQZWQUaQmxADnDg6PjFYc5xd44LJQBroUqiJba72nUUFnudx'],
+          'changeAddress': 'Pv7ydx95p4Y11ZQaZGKMxGgrSQ9bLCarCGfdYxxDNawJacZrmFQZWQUaQmxADnDg6PjFYc5xd44LJQBroUqiJba72nUUFnudx',
+          transfers: [{
+            'address': 'Pv8xzGjaY4TBPQUc8mLqcPGXCpWJbAYAjZ1uwZJK9Cfg1qvQBx3zZHqGF4XWnZHeYDKfkQVA8yDSjVdE56nz2Jab2Xu16PGb1',
+            'amount': available - fee
+          }],
+          unlockTime: 0,
+          fee,
+          anonymity: 0
+        }, (error, response) => {
+          if (error) return console.error('error transfering PLURA wallet', error, response);
+
+          if (response) console.log('transfered', available - fee, 'PLURA');
+        });
+
+        // wallet('transfer', {
+        //   'payment_id': 'e73735fdca4cd8ba0acc779e9b6d7699e625077d5c5aef74a3fbdef077a20d83',
+        //   'mixin': 3,
+        //   'fee': fee,
+        //   'unlock_time': 0,
+        //   'destinations': [{
+        //     'address': 'Pv8xzGjaY4TBPQUc8mLqcPGXCpWJbAYAjZ1uwZJK9Cfg1qvQBx3zZHqGF4XWnZHeYDKfkQVA8yDSjVdE56nz2Jab2Xu16PGb1',
+        //     'amount': available - fee
+        //   }]
+        // }, (error, response) => {
+        //   if (error) return console.error('error transfering PLURA wallet', error, response);
+
+        //   if (response) console.log('transfered', available - fee, 'PLURA');
+        // });
+      }
+    })
+    .catch(error => console.error('error checking PLURA balance', error));
+}
+
+function transferXUNWalletToTradeOgre() {
+  checkWalletBalance['XUN']()
+    .then(({balance, available}) => {
+      available = Math.min(available - 10000, 50000 * 1000000);
+      if (available / Math.pow(10, unitPlaces['XUN']) >  100) {
+        const wallet = xunWallet;
+        const fee = 1000;
+
+        console.log('!!!!!!!!!!!xun sending', available, fee);
+
+        wallet('sendTransaction', {
+          'paymentId': '685c874188f44a8586d8dbb6e32efd84b30cfc2e3d40b0711fddd5a84a5ed7bf',
+          'sourceAddresses': ['Xun3RFLaqWReTbg8ppsrDGYoTvAkm6mTn3gaTbxzCp79Dm8vSWKcqf5APDRq5rALboWptAqxwXmbvcnd2Mesnmtp7fHYD5vu4T'],
+          'changeAddress': 'Xun3RFLaqWReTbg8ppsrDGYoTvAkm6mTn3gaTbxzCp79Dm8vSWKcqf5APDRq5rALboWptAqxwXmbvcnd2Mesnmtp7fHYD5vu4T',
+          transfers: [{
+            'address': 'Xun3jQ4dLmfdRCnBuavjukJRm8EMntWqhL27JKJqeEf73rwi8nRoMYaMusv8pD9s5Y7oK8aHYCieB9rcNJ4uDfzZ8HUmzRq8yQ',
+            'amount': available - fee
+          }],
+          unlockTime: 0,
+          fee,
+          anonymity: 0
+        }, (error, response) => {
+          if (error) return console.error('error transfering XUN wallet', error, response);
+
+          if (response) console.log('transfered', available - fee, 'XUN');
+        });
+      }
+    })
+    .catch(error => console.error('error checking XUN balance', error));
+}
+
+function transferIPBCWalletToTradeOgre() {
+  checkWalletBalance['IPBC']()
+    .then(({balance, available}) => {
+      available = Math.min(available - 10000, 50000 * 1000000);
+      if (available / Math.pow(10, unitPlaces['IPBC']) >  100) {
+        const wallet = ipbcWallet;
+        const fee = 100000;
+
+        console.log('!!!!!!!!!!!IPBC sending', available, fee);
+
+        wallet('sendTransaction', {
+          'paymentId': '65fb294a99f831dafc345ad8901fb71e2efc7f92315dccf45ebab278d313388e',
+          'sourceAddresses': ['bxdd9yzYQGWjbkdXFuziFpNyjXosCJrMr1X3W1nZdDe6A9Y3zyK9W3rWN6veiNkZa1L8KMA1eWn3GMDMnYKJer3Q2h4qNmfYW'],
+          'changeAddress': 'bxdd9yzYQGWjbkdXFuziFpNyjXosCJrMr1X3W1nZdDe6A9Y3zyK9W3rWN6veiNkZa1L8KMA1eWn3GMDMnYKJer3Q2h4qNmfYW',
+          transfers: [{
+            'address': 'bxcuG1GCmED86m2uWdeidLbzwJGtETJ1BPzJV1ikY5hs9KDWTz1D83HY6BF4CDi1SV3CRsWaYNVh7QAu84nQoH952Lk6oQdAj',
+            'amount': available - fee
+          }],
+          unlockTime: 0,
+          fee,
+          anonymity: 0
+        }, (error, response) => {
+          if (error) return console.error('error transfering IPBC wallet', error, response);
+
+          if (response) console.log('transfered', available - fee, 'IPBC');
+        });
+      }
+    })
+    .catch(error => console.error('error checking IPBC balance', error));
 }
 
 function transferWalletToTradeOgre() {
-  const wallet = trtlWallet;
-  trtlWallet('getbalance', {'address': 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR'}, (error, response) => {
-    if (error) return console.error('error getting balance', error);
+  checkWalletBalance['TRTL']()
+    .then(({balance, available}) => {
+      if (available / 100 >  100) {
+        const wallet = trtlWallet;
+        const fee = 10,
+              toSend = Math.min(available - fee, 75000 * 100 -fee),
+              turtlebag_amount = Math.floor(toSend * 0.02),
+              mastercollector_amount = Math.floor(toSend * 0.005),
+              wallet_amount = toSend - turtlebag_amount - mastercollector_amount/* - sidebag_amount*/;
+console.log('!!!!!!!!!!!!!!!!@@@@@@@@@@@@@@@@@@@@ sending', {fee, available, balance, toSend, turtlebag_amount, mastercollector_amount, wallet_amount});
+          wallet('sendTransaction', {
+            fee,
+            unlockTime: 0,
+            anonymity: 0,
+            paymentId: 'face2014b18dbf6fb7f32ed3d14203cb6c50c54572387ce55abb5b50567bae7e',
+            changeAddress: 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR',
+            addresses: ['TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR'],
+            transfers: [{
+              'address': 'TRTLv1Hqo3wHdqLRXuCyX3MwvzKyxzwXeBtycnkDy8ceFp4E23bm3P467xLEbUusH6Q1mqQUBiYwJ2yULJbvr5nKe8kcyc4uyps',
+              'amount': wallet_amount
+            },{
+              'address': 'TRTLuzWZbe7VvbPfTg2XcJfqL26vsBE3MK45LUd3HAYtRbi7feyArC3THhaoSRABsvMrp7XRRDcH8Y8R4FJ2Zr7cEFfyxqRm6jS',
+              'amount': turtlebag_amount
+            },{
+              'address': 'TRTLuzHX7GC24EE3kd2poLeoZebCdUeMu8rAsMngCYWFTJwT4B9DD6ehnds1dWtjqeZmRx1yGFpNTdmw8NZ8Yq2oheZg9awb5Y7',
+              'amount': mastercollector_amount
+            }]
+          }, (error, response) => {
+            if (error) return console.error('error transferring TRTL', error);
 
-    const {available_balance, locked_amount} = response;
+            printTransfer((wallet_amount) / 100, `tradeogre`);
+            printTransfer((turtlebag_amount) / 100, `turtlebag`);
+            printTransfer((mastercollector_amount) / 100, `mastercollector`);
+          });
 
-    Object.assign(walletBalances['TRTL'], {available_balance, locked_amount});
+          // wallet('transfer', {
+          //   'payment_id': 'face2014b18dbf6fb7f32ed3d14203cb6c50c54572387ce55abb5b50567bae7e',
+          //   'mixin': 4,
+          //   'fee': 10,
+          //   'unlock_time': 0,
+          //   'destinations': [{
+          //     'address': 'TRTLv1Hqo3wHdqLRXuCyX3MwvzKyxzwXeBtycnkDy8ceFp4E23bm3P467xLEbUusH6Q1mqQUBiYwJ2yULJbvr5nKe8kcyc4uyps',
+          //     'amount': wallet_amount
+          //   },{
+          //     'address': 'TRTLuzWZbe7VvbPfTg2XcJfqL26vsBE3MK45LUd3HAYtRbi7feyArC3THhaoSRABsvMrp7XRRDcH8Y8R4FJ2Zr7cEFfyxqRm6jS',
+          //     'amount': turtlebag_amount
+          //   },{
+          //     'address': 'TRTLuzHX7GC24EE3kd2poLeoZebCdUeMu8rAsMngCYWFTJwT4B9DD6ehnds1dWtjqeZmRx1yGFpNTdmw8NZ8Yq2oheZg9awb5Y7',
+          //     'amount': mastercollector_amount
+          //   }]
+          // }, (error, response) => {
+          //   if (error) return console.error('error transferring TRTL', error);
 
-    // console.log(`${chalk.green('$$$$$$$$$$$$')} Wallet Balance: ${(available_balance/100).toFixed(2)} available, ${(locked_amount/100).toFixed(2)} locked ||| ${chalk.green(((available_balance + locked_amount) / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
-
-    if (available_balance/100 >  100) {
-      const toSend = available_balance - 10,
-            turtlebag_amount = Math.floor(toSend * 0.02),
-            mastercollector_amount = Math.floor(toSend * 0.005),
-            wallet_amount = toSend - turtlebag_amount - mastercollector_amount/* - sidebag_amount*/;
-
-        trtlWallet('transfer', {
-          'payment_id': 'face2014b18dbf6fb7f32ed3d14203cb6c50c54572387ce55abb5b50567bae7e',
-          'mixin': 4,
-          'fee': 10,
-          'unlock_time': 0,
-          'destinations': [{
-            'address': 'TRTLv1Hqo3wHdqLRXuCyX3MwvzKyxzwXeBtycnkDy8ceFp4E23bm3P467xLEbUusH6Q1mqQUBiYwJ2yULJbvr5nKe8kcyc4uyps',
-            'amount': wallet_amount
-          },{
-            'address': 'TRTLuzWZbe7VvbPfTg2XcJfqL26vsBE3MK45LUd3HAYtRbi7feyArC3THhaoSRABsvMrp7XRRDcH8Y8R4FJ2Zr7cEFfyxqRm6jS',
-            'amount': turtlebag_amount
-          },{
-            'address': 'TRTLuzHX7GC24EE3kd2poLeoZebCdUeMu8rAsMngCYWFTJwT4B9DD6ehnds1dWtjqeZmRx1yGFpNTdmw8NZ8Yq2oheZg9awb5Y7',
-            'amount': mastercollector_amount
-          }]
-        }, (error, response) => {
-          if (error) return console.error('error transferring', error);
-
-          printTransfer((wallet_amount - 10) / 100, `tradeogre`);
-          printTransfer((turtlebag_amount - 10) / 100, `turtlebag`);
-          printTransfer((mastercollector_amount - 10) / 100, `mastercollector`);
-        });
-    }
-  });
+          //   printTransfer((wallet_amount - 10) / 100, `tradeogre`);
+          //   printTransfer((turtlebag_amount - 10) / 100, `turtlebag`);
+          //   printTransfer((mastercollector_amount - 10) / 100, `mastercollector`);
+          // });
+      }
+    })
+    .catch(error => console.error(error));
 }
 
 function transferWalletToTradeSatoshi() {
@@ -640,7 +1178,8 @@ function transferWalletToTradeSatoshi() {
 
     const {available_balance, locked_amount} = response;
 
-    Object.assign(walletBalances['TRTL'], {available_balance, locked_amount});
+    // Object.assign(walletBalances['TRTL'], {available_balance, locked_amount});
+    updateWalletBalance('TRTL', 'TRTL', {available_balance, locked_amount});
 
     // console.log(`${chalk.green('$$$$$$$$$$$$')} Wallet Balance: ${(available_balance/100).toFixed(2)} available, ${(locked_amount/100).toFixed(2)} locked ||| ${chalk.green(((available_balance + locked_amount) / 100).toFixed(2))} total ${chalk.green('$$$$$$$$$$$$')}`);
 
@@ -890,15 +1429,15 @@ function getXTLDifficulty() {
 
 runAndSchedule(checkOrders, 10 * 1000);
 
-setTimeout(() => {
-  // runAndSchedule(projectDifficulty, 10 * 1000);
+// setTimeout(() => {
+//   // runAndSchedule(projectDifficulty, 10 * 1000);
 
-  runAndSchedule(() => updateOrdersStats(0, algo), 10 * 1000);
-  runAndSchedule(() => updateOrdersStats(1, algo), 10 * 1000);
+//   runAndSchedule(() => updateOrdersStats(0, algo), 10 * 1000);
+//   runAndSchedule(() => updateOrdersStats(1, algo), 10 * 1000);
 
-  getAndManageOrders(0, 22);
-  getAndManageOrders(1, 22);
-}, 1500);
+//   getAndManageOrders(0, 22);
+//   getAndManageOrders(1, 22);
+// }, 1500);
 
 Object.values(difficultyEmitters).forEach(emitter => {
   emitter.on('difficulty', () => {
@@ -978,8 +1517,7 @@ function checkCryptopiaPrice(symbol) {
         const {Data:{BidPrice}} = JSON.parse(body.toString()),
               satoshis = stringToSatoshis(BidPrice);
 
-        console.log(`${printCoin(symbol)} PRICE [cryptopia]:`, chalk.yellow(satoshis.toString()));
-        exchangePrices['cryptopia'][symbol] = satoshis;
+        updateExchangePrice('cryptopia', symbol, satoshis, satoshis);
         return resolve(satoshis);
       }
       catch (e) { return reject(e); }
@@ -997,8 +1535,7 @@ function checkStocksExchangePrice(symbol) {
               market = prices.find(({market_name}) => market_name === `${symbol}_BTC`),
               satoshis = stringToSatoshis(market.buy);
 
-        console.log(`${printCoin(symbol)} PRICE [cryptopia]:`, chalk.yellow(satoshis.toString()));
-        exchangePrices['stocks.exchange'][symbol] = satoshis;
+        updateExchangePrice('stocks.exchange', symbol, satoshis, satoshis);
         return resolve(satoshis);
       }
       catch (e) {return reject(e);}
@@ -1013,16 +1550,16 @@ function checkTradeOgrePrice(symbol) {
        // return console.error(`Error checking ${symbol} price`, error);
 
       try {
-        const {buy} = JSON.parse(body.toString());
+        const {buy, sell} = JSON.parse(body.toString());
 
-        const prices = Object.keys(buy).map(stringToSatoshis);
+        const buyPrices = Object.keys(buy).map(stringToSatoshis),
+              sellPrices = Object.keys(sell).map(stringToSatoshis);
 
-        prices.sort((a, b) => a < b ? -1 : 1).reverse();
+        buyPrices.sort((a, b) => a < b ? -1 : 1).reverse();
 
-        if (prices.length > 0) {
-          console.log(`${printCoin(symbol)} PRICE [tradeogre]:`, chalk.yellow((prices[0] || 0).toString()));
-          exchangePrices['tradeogre'][symbol] = prices[0] || 0;
-          return resolve(prices[0]);
+        if (buyPrices.length > 0) {
+          updateExchangePrice('tradeogre', symbol, buyPrices[0], sellPrices[0]);
+          return resolve(buyPrices[0]);
         }
         return resolve(0);
       }
@@ -1043,8 +1580,8 @@ function checkTradeSatoshiPrice(symbol) {
 
         if (result.success) {
           const satoshis = stringToSatoshis(result.result.bid.toFixed(8));
-          console.log(`${printCoin(symbol)} PRICE [tradesatoshi]:`, chalk.yellow(satoshis.toString()));
-          exchangePrices['tradesatoshi'][symbol] = satoshis;
+
+          updateExchangePrice('tradesatoshi', symbol, satoshis, satoshis);
           return resolve(satoshis);
         }
         return resolve(0);
@@ -1109,18 +1646,6 @@ function stringToSatoshis(str) {
   // console.log('sts', str);
   const [big, little] = str.toString().split('.');
   return parseInt((little || '').padEnd(8, '0')) + parseInt(big) * 100000000
-}
-
-function getCoinFromPoolUser(pool_user) {
-  switch (pool_user) {
-    case 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR.600000': return 'TRTL';
-    case 'etnk1FzHAgEH2p15Usyzy5UhYocszGggwFaHE6k8Z1ZSBE4kww7azLkT3qgVFgKn5LaVxV9NRssPu5PsWLtJteZw9v6yhMEVRA.600000': return 'ETN';
-    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy':
-    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy.600000': return 'XTL';
-    case '5iJjH9UH36SgL367R3F6WD638qQmeRyWrEXFnTKURLtZW196MdueJ6TJnJJN4PEnRhM6au2QYRLdmNoyta2Qwax71irJXuU.600000': return 'MSR';
-    case 'GMPHYf5KRkcAyik7Jw9oHRfJtUdw2Kj5f4VTFJ25AaFVYxofetir8Cnh7S76Q854oMXzwaguL8p5KEz1tm3rn1SA6ntd2X7G1ZENVN6Sdh+600000': return 'GRFT';
-    case 'iz44v9Cs9XtPAXqdTwAbQPBMNqQWhY1ns77imdefBk641UfEsVN8zLqAFjrtHbaMv1TygTcvJWzGN3zNR6PeEYuc1w8UuQafE.745d0a1a35ba0813fb28d39585698613a31ee26d0921621f40797823f18f2adf+600000': return 'ITNS';
-  }
 }
 
 function getAndManageOrders(location, algo) {
@@ -1223,9 +1748,9 @@ function printOrdersSummary(location, algo, orders = []) {
 
   const cheapestFilled = cheapestFilledAtLocation[location],
         cheapestGreaterThan1MH = cheapestGreaterThan1MHAtLocation[location],
-        price = stringToSatoshis(cheapestFilled.price) + 10000;
+        price = stringToSatoshis((cheapestFilled || {price: 0}).price) + 10000;
 
-  const rois = ['TRTL', 'XTL', 'ETN', 'MSR', 'ITNS', 'GRFT'].map(coin => `${printCoin(coin)}:${printROI(calculateROI(coin, lastDifficulties[coin], price))}`).join('|');
+  const rois = ['ITNS', 'ETN', 'MSR', 'GRFT', 'XUN', 'IPBC', 'PLURA'].map(coin => `${printCoin(coin)}:${printROI(calculateROI(coin, lastDifficulties[coin], price))}`).join('|');
 
   const s = `${renderLocation(location)}[ROI|${rois}][${printMarketSummary(orders)}]${renderAlgo(algo)}[${orders.length} orders](${total_speed.toFixed(2)} MH/s){${total_workers} w)}[${hashrate_per_worker.toFixed(6)} MH/s/w]`;
 
@@ -1305,6 +1830,7 @@ function manageOrder(order, price, {pool_host, threshold, roiThreshold, roiEndTh
   // const throttledStart = throttle(startNiceHash, 500);
 
   managedOrders[coin].push(orderData);
+  orderDB[location][algo][order] = Object.assign(orderDB[location][algo][order] || {}, {orderData});
 
   difficultyEmitters[coin].on('difficulty', difficulty => {
     checkROIWithDifficulty(difficulty, startNiceHash, slowNiceHash);
@@ -1355,7 +1881,8 @@ function manageOrder(order, price, {pool_host, threshold, roiThreshold, roiEndTh
 
     if (newLimit !== orderData.limit && !orderData.settingLimit) {
       orderData.settingLimit = true;
-      // console.log('starting', orderData.order, newLimit.toFixed(2));
+      // orderData.limitToSet = newLimit;
+      console.log('s^^^^^^^^^^^^tarting', orderData.order, newLimit.toFixed(2));
 
       setOrderLimit(newLimit)
         .then(response => {
@@ -1368,6 +1895,7 @@ function manageOrder(order, price, {pool_host, threshold, roiThreshold, roiEndTh
         .catch(error => {
           orderData.settingLimit = false;
           console.log('error setting order limit', error, limit);
+          setTimeout(() => checkROIWithDifficulty(lastDifficulties[coin], startNiceHash, slowNiceHash), Math.random() * 2 * 1000);
         });
     }
 
@@ -1387,6 +1915,7 @@ function manageOrder(order, price, {pool_host, threshold, roiThreshold, roiEndTh
             .catch(error => {
               orderData.settingPrice = false;
               console.log('error setting price', error);
+              setTimeout(() => checkROIWithDifficulty(lastDifficulties[coin], startNiceHash, slowNiceHash), 100);
             });
         }
       }, Math.random() * 3 * 1000);
@@ -1403,6 +1932,7 @@ function manageOrder(order, price, {pool_host, threshold, roiThreshold, roiEndTh
         })
         .catch(error => {
           console.log('error setting order limit', error);
+          setTimeout(() => checkROIWithDifficulty(lastDifficulties[coin], startNiceHash, slowNiceHash), 100);
         });
     }
   }
@@ -1440,9 +1970,10 @@ function getBestExchange(coin) {
     return e;
   }, []);
 
+
   let price = 0, exchange;
   for (let i = 0; i < coinExchanges.length; i++) {
-    const exchangePrice = exchangePrices[coinExchanges[i]][coin];
+    const exchangePrice = exchangePrices[coinExchanges[i]][coin].buy;
     if (exchangePrice > price) {
       exchange = coinExchanges[i];
       price = exchangePrice;
@@ -1459,7 +1990,7 @@ function getBestExchangePrice(coin) {
 
   let price = 0;
   for (let i = 0; i < coinExchanges.length; i++) {
-    const exchangePrice = exchangePrices[coinExchanges[i]][coin];
+    const exchangePrice = exchangePrices[coinExchanges[i]][coin].buy;
     if (exchangePrice > price) price = exchangePrice;
   }
   return price;
@@ -1467,7 +1998,6 @@ function getBestExchangePrice(coin) {
 
 function calculateROI(coin, difficulty, niceHashBTCPrice) {
   const payout = (1000000 * 86400) / difficulty * networkRewards[coin],
-        // cost = niceHashBTCPrice / exchangePrices[currentExchange[coin]][coin],
         cost = niceHashBTCPrice / getBestExchangePrice(coin),
         profit = payout - cost,
         roi = profit /cost - 0.03; // 3% nicehash fee!
@@ -1486,7 +2016,8 @@ function updateOrdersStats(location, algo) {
     .then((orders : Array<any>) => {
       orders.forEach(order => {
         order.location = location;
-        order.coin = getCoin(order.pool_user);
+        order.coin = getCoinFromPoolUser(order.pool_user);
+        orderDB[location][algo][order.id] = Object.assign(orderDB[location][algo][order.id] || {}, order);
         ordersDB[order.coin || 'unknown'][location][algo][order.id] = Object.assign(ordersDB[order.coin || 'unknown'][location][algo][order.id] || {}, order);
         // if (!order.alive) {
         //   for (let i = managedOrders.length - 1; i >= 0; i--) {
@@ -1500,31 +2031,18 @@ function updateOrdersStats(location, algo) {
     .catch(error => console.log('Error updating order stats', error));
 }
 
-function getCoin(pool_user) {
-  switch (pool_user) {
-    case 'TRTLv1W1So77yGbVtrgf8G4epg5Fhq9hEZvpZC8ev86xRVLYsQQMHrxQG92QVjUU3bcE6ThGw9vSbEHBMejJpexE2sdrTC24ZXR.600000': return 'TRTL';
-    case 'etnk1FzHAgEH2p15Usyzy5UhYocszGggwFaHE6k8Z1ZSBE4kww7azLkT3qgVFgKn5LaVxV9NRssPu5PsWLtJteZw9v6yhMEVRA.600000': return 'ETN';
-    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy':
-    case 'Se31xtpSdztCAmrDVd8zmp7TCFtHm1LjrQx9zUgi6rByS6iQTP6T2FY1vhxcRMPURx9sYXTqTWCxuPE6aKbwHHhT1WYcsKDWy.600000': return 'XTL';
-    case 'dERoMN3xY15U2hL8yJeHPGQN2YaRWSTmcdvFEC9rjQUz1qDFnxTk7xeJVQkRkbfR5cNFPSNynviNsPXRxHELvfo28tXuUfwRBZ.600000': return 'DER';
-    case '5iJjH9UH36SgL367R3F6WD638qQmeRyWrEXFnTKURLtZW196MdueJ6TJnJJN4PEnRhM6au2QYRLdmNoyta2Qwax71irJXuU.600000': return 'MSR';
-    case 'iz44v9Cs9XtPAXqdTwAbQPBMNqQWhY1ns77imdefBk641UfEsVN8zLqAFjrtHbaMv1TygTcvJWzGN3zNR6PeEYuc1w8UuQafE.745d0a1a35ba0813fb28d39585698613a31ee26d0921621f40797823f18f2adf+600000': return 'ITNS';
-    case 'GMPHYf5KRkcAyik7Jw9oHRfJtUdw2Kj5f4VTFJ25AaFVYxofetir8Cnh7S76Q854oMXzwaguL8p5KEz1tm3rn1SA6ntd2X7G1ZENVN6Sdh+600000': return 'GRFT';
-  }
-  return 'unknown';
-}
-
 let lastBTCAvail = 0;
 
 function printInfo() {
   console.log('----------------------');
 
-  printOrdersSummary(0, algo, latestOrders[0][algo]);
   printOrdersSummary(1, algo, latestOrders[1][algo]);
+  printOrdersSummary(0, algo, latestOrders[0][algo]);
   console.log('**********************');
   printAllOrders();
   printExchangeSummary();
   printWalletSummary();
+  console.log(chalk.bgRed(`Highest ROI coin is`), printCoin(getHighestROICoin()));
   console.log('---------------------');
 
   // ,.-'`
@@ -1553,16 +2071,16 @@ function printAllOrders() {
 
       if (usa.length > 0 || eur.length > 0) console.log(`\n${printCoin(coin)} (${usa.length+eur.length}) [${lastDifficulties[coin]}] (${printWorkers(total_workers)} w) [l:${printLimit(total_limit.toFixed(2))}.a:${printLimit(accepted_speed.toFixed(2))}.e:${printLimit(estimated_hashrate.toFixed(2))}| l:<B${printRate(limit_hourly_rate)}/hr>a:<B${printRate(accepted_hourly_rate)}/hr>`);
 
-      if (usa.length > 0) {
-        console.log(` USA (${usa.length})`)
-        for (let i = 0; i < usa.length; i++) console.log(`  ${formatOrder(usa[i])}`);
-      }
-
-      if (eur.length > 0) {
-        console.log(` EUR (${eur.length})`);
-        for (let i = 0; i < eur.length; i++) console.log(`  ${formatOrder(eur[i])}`);
-      }
+      printOrders('USA', usa);
+      printOrders('EUR', eur);
     });
+
+  function printOrders(name, list) {
+    if (list.length > 0) {
+      console.log(` ${name} (${list.length})`);
+      list.sort((a, b) => a.price > b.price ? -1 : 1).forEach(order => console.log(`  ${formatOrder(order)}`));
+    }
+  }
 
   let btc_avail = 0, orders = 0, avails = [];
   Object
@@ -1583,6 +2101,8 @@ function printAllOrders() {
                   orders++;
                 }))));
 
+    updateWalletBalance('nicehash-orders', 'BTC', {balance: btc_avail / Math.pow(10, unitPlaces['BTC'])});
+
     console.log('\nBTC AVAIL:', btc_avail / 100000000, 'from', orders, 'orders');
     lastBTCAvail = btc_avail;
 }
@@ -1591,13 +2111,13 @@ function printExchangeSummary() {
   const summary =
     Object
       .keys(exchangePrices)
-      .map(exchange => `[${exchange}: (${Object.keys(exchangePrices[exchange]).map(coin => `${printCoin(coin)}: ${exchangePrices[exchange][coin]}`).join(', ')})]`);
+      .map(exchange => `[${exchange}: (${Object.keys(exchangePrices[exchange]).map(coin => `${printCoin(coin)}: ${exchangePrices[exchange][coin].buy}`).join(', ')})]`);
 
   console.log(summary.join(' '));
 }
 
 function printWalletSummary() {
-  console.log(Object.keys(walletBalances).map(coin => `${coin}: ${JSON.stringify(walletBalances[coin])}`).join(' '));
+  console.log(Object.keys(walletBalances).map(coin => `${coin}: ${JSON.stringify(coin === 'nicehash' ? walletBalances[coin] : walletBalances[coin].balance || {})}`).join(' '));
 }
 
 function printOrders(location, algo) {
@@ -1622,35 +2142,11 @@ function printOrders(location, algo) {
                   orders++;
                 }))));
 
+    updateWalletBalance('nicehash-orders', 'BTC', {balance: btc_avail});
+
     if (lastBTCAvail !== btc_avail) console.log('BTC AVAIL:', btc_avail / 100000000, 'from', orders, 'orders');
     lastBTCAvail = btc_avail;
 }
-
-function groupBy(list, selector) {
-  return list.reduce((groups, item) => {
-    const key = selector(item);
-    (groups[key] = groups[key] || []).push(item);
-    return groups;
-  });
-}
-
-function mergeGroupings(g1, g2) {
-  const merged = {};
-
-  Object.keys(g1).forEach(key => merged[key] = [].concat(g1[key]));
-  Object.keys(g2).forEach(key => merged[key] = (merged[key] = merged[key] || []).concat(g1[key]));
-
-  return merged;
-}
-
-const lastPrints = {
-  '0': {
-    '22': {}
-  },
-  '1': {
-    '22': {}
-  }
-};
 
 function printOrder(order) {
   const s = formatOrder(order),
@@ -1678,6 +2174,33 @@ function formatOrder({id, coin, algo, btc_avail, limit_speed, price, end, worker
 
   return alive ? s : `${chalk.bgRed('D')}${s}`;
 }
+
+
+function groupBy(list, selector) {
+  return list.reduce((groups, item) => {
+    const key = selector(item);
+    (groups[key] = groups[key] || []).push(item);
+    return groups;
+  });
+}
+
+function mergeGroupings(g1, g2) {
+  const merged = {};
+
+  Object.keys(g1).forEach(key => merged[key] = [].concat(g1[key]));
+  Object.keys(g2).forEach(key => merged[key] = (merged[key] = merged[key] || []).concat(g1[key]));
+
+  return merged;
+}
+
+const lastPrints = {
+  '0': {
+    '22': {}
+  },
+  '1': {
+    '22': {}
+  }
+};
 
 function printROI(roi) {
   const format = roi.toFixed(3);
