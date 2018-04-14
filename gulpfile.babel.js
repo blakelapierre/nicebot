@@ -51,7 +51,7 @@ gulp.task('transpile',
     ,p('transpile')
     ,sourcemaps.init()
     ,typescript({
-      target: 'ES6',
+      target: 'ES5',
       module: 'umd',
       moduleResolution: 'node',
       lib: ['es2017']

@@ -1,6 +1,10 @@
 import { h, render } from 'preact-cycle';
 
-const data = {orders:{}, walletBalances: {}, coinExchanges: {}, walletSummary: {inBTC: 0, inUSD: 0}};
+window.addEventListener('error', error => {
+  alert(`${error.message}`);
+});
+
+const data = {orders:{}, walletBalances: {}, coinExchanges: {}, walletSummary: {inBTC: 0, inUSD: 0}, proxyStats: {}};
 
 Object.prototype.map = function(fn) {
   return Object.keys(this).map(key => fn(key, this[key]));
@@ -12,7 +16,7 @@ Object.prototype.forEach = function(fn) {
 
 Object.prototype.reduce = function(fn, init) {
   return Object.values(this).reduce(fn, init);
-}
+};
 
 connectToServer();
 
@@ -41,7 +45,8 @@ function INIT(_, mutation) {
     'orders': mutation(UPDATE_ORDERS, mutation),
     'my_orders': mutation(UPDATE_MY_ORDERS, mutation),
     'wallet-balances': mutation(UPDATE_WALLET_BALANCES, mutation),
-    'exchange-prices': mutation(UPDATE_EXCHANGE_PRICES, mutation)
+    'exchange-prices': mutation(UPDATE_EXCHANGE_PRICES, mutation),
+    'proxy-stats': mutation(UPDATE_PROXY_STATS, mutation)
   });
 
   _.conversions = {
@@ -78,9 +83,24 @@ function UPDATE_ORDERS(_, mutation, {location, algo, orders}) {
   _.orders[location] = _.orders[location] || {};
   _.orders[location][algo] = _.orders[location][algo] || {};
   _.orders[location][algo].orders = orders;
-  _.orders[location][algo].totalWorkers = orders.reduce((sum, {workers}) => sum + workers, 0);
+
+  const totalWorkers = orders.reduce((sum, {workers}) => sum + workers, 0);
+  _.orders[location][algo].totalWorkers = totalWorkers;
   _.orders[location][algo].totalSpeed = orders.reduce((sum, {accepted_speed}) => sum + parseFloat(accepted_speed) * 1000, 0);
   _.orders[location][algo].hashratePerWorker = _.orders[location][algo].totalSpeed / _.orders[location][algo].totalWorkers;
+
+  let i, requestedLimit = 0;
+  for (i = 0; i < orders.length; i++) {
+    const order = orders[i];
+
+    order.limitAbove = requestedLimit;
+    requestedLimit += order.limit_speed;
+
+    if (order.limit_speed === 0) break;
+  }
+  for (i; i < orders.length; i++) {
+    order.limitAbove = -1;
+  }
 }
 
 function UPDATE_MY_ORDERS(_, mutation, {location, algo, orders}) {
@@ -97,6 +117,7 @@ function UPDATE_WALLET_BALANCES(_, mutation, balances) {
     const {coin, balance} = value;
     value.inBTC = _.conversions.toBTC(coin, balance);
     value.inUSD = _.conversions.toUSD(coin, balance);
+    value.wallet = wallet;
   });
 
   _.walletSummary = _.walletBalances.reduce((agg, {inBTC = 0, inUSD = 0}) => {
@@ -129,6 +150,10 @@ function UPDATE_EXCHANGE_PRICES(_, mutation, exchangePrices) {
   }, {inBTC: 0, inUSD: 0});
 }
 
+function UPDATE_PROXY_STATS(_, mutation, {proxy, stats}) {
+  _.proxyStats[proxy] = stats;
+}
+
 function convertToBTC(coin, value) {
   if (coin === 'BTC') return value;
 
@@ -153,6 +178,23 @@ const OrdersView = ({orders: {orders = [], totalWorkers = 0, totalSpeed = 0, has
   </orders>
 );
 
+    // {Object.keys(proxyStats).map(proxy => <ProxyStats proxy={proxy} />)}
+const ProxiesStats = ({}, {proxyStats}) => (
+  <proxies-stats>
+    <ProxyStats proxy="eur" />
+    <ProxyStats proxy="usa" />
+  </proxies-stats>
+);
+
+const ProxyStats = ({proxy}, {proxyStats}) => (
+  <proxy-stats>
+    <total>{(Object.values(proxyStats[proxy] || {}).reduce((sum, {rate, timestamp}) => sum + (timestamp < new Date().getTime() - 15 * 1000 ? 0 : rate), 0) / 1000).toFixed(2)} MH/s</total>
+    <workers>
+      {Object.keys(proxyStats[proxy] || {}).map(id => <worker-stats className={proxyStats[proxy][id].timestamp < (new Date().getTime() - 15 * 1000) ? 'old-timestamp' : ''}>{id}: {(proxyStats[proxy][id].rate / 1000).toFixed(2)} MH/s</worker-stats>)}
+    </workers>
+  </proxy-stats>
+);
+
 // {order.price} {order.type} {order.alive ? 'alive' : 'dead'} {parseFloat(order.limit_speed).toFixed(2)} {(order.accepted_speed).toFixed(2)} {order.workers}
 const OrderView = ({order, totalWorkers = 0, totalSpeed = 0, hashratePerWorker = 0, my_orders = {}}) => (
   <order title={`${order.price} limit: ${parseFloat(order.limit_speed).toFixed(2)} accepted: ${(order.accepted_speed * 1000).toFixed(2)} workers: ${order.workers}`}
@@ -161,13 +203,15 @@ const OrderView = ({order, totalWorkers = 0, totalSpeed = 0, hashratePerWorker =
       limit={parseFloat(order.limit_speed)}
       acceptedRatio={Math.min(1.25, Math.log2(1 + order.accepted_speed * 1000 / order.limit_speed))}
       workers={order.workers}
+      limitAbove={order.limitAbove}
+      workersAvailable={order.workersAvailable}
       workerRatio={Math.min(1.25, Math.log2(1 + order.workers / totalWorkers))}
       limitRatio={Math.min(1.25, Math.log2(1 + order.limit_speed / totalSpeed))} />
   </order>
 );
 
-const SpeedBar = ({limit, acceptedRatio, workers, workerRatio, limitRatio}) => (
-  <speed-bar className={{'no-workers': workers === 0}}>
+const SpeedBar = ({limit, acceptedRatio, workers, limitAbove, workersAvailable, workerRatio, limitRatio}) => (
+  <speed-bar className={{'no-workers': workers === 0, 'no-workers-available': workersAvailable <= 0}}>
     <full-speed></full-speed>
     {limit === 0 ? <unlimited-speed></unlimited-speed>
                  : <accepted-speed style={{'width': `${acceptedRatio * 100}%`}}></accepted-speed>}
@@ -186,12 +230,12 @@ const WalletBalances = ({}, {walletBalances, walletSummary}) => (
         <th>~USD</th>
       </thead>
       <tbody>
-        {walletBalances.map((coin, {balance, inBTC, inUSD}) => <WalletBalanceRow coin={coin} balance={balance} inBTC={inBTC} inUSD={inUSD} />)}
+        {Object.values(walletBalances).sort((a, b) => a.inBTC > b.inBTC ? 1 : (a.inBTC === b.inBTC ? (a.wallet < b.wallet ? -1 : 1) : -1)).map(({balance, wallet, inBTC, inUSD}) => <WalletBalanceRow coin={wallet} balance={balance} inBTC={inBTC} inUSD={inUSD} />)}
       </tbody>
       <tfoot>
         <tr>
           <td colspan={2}></td>
-          <td>{walletSummary.inBTC.toFixed(3)}</td>
+          <td>{walletSummary.inBTC.toFixed(4)}</td>
           <td>${walletSummary.inUSD.toFixed(2)}</td>
         </tr>
       </tfoot>
@@ -204,7 +248,7 @@ const WalletBalanceRow = ({coin, balance = 0, inBTC = 0, inUSD = 0}) => (
   <tr>
     <td>{coin}</td>
     <td>{parseFloat(balance).toFixed(2)}</td>
-    <td>{parseFloat(inBTC).toFixed(3)}</td>
+    <td>{parseFloat(inBTC).toFixed(4)}</td>
     <td>${parseFloat(inUSD).toFixed(2)}</td>
   </tr>
 );
@@ -212,6 +256,7 @@ const WalletBalanceRow = ({coin, balance = 0, inBTC = 0, inUSD = 0}) => (
 const GUI = ({}, {init, mutation}) => (
   <gui>
     {!init ? mutation(INIT)(mutation) : undefined}
+    <ProxiesStats />
     <SideBySide />
     <WalletBalances />
   </gui>

@@ -26,9 +26,10 @@ function jsonHttpRequest(host, port, data, callback, path = undefined){
             var replyJson;
             // console.log({replyData});
             try{
-                replyJson = JSON.parse(replyData);
+                replyJson = JSON.parse(replyData || '{}');
             }
             catch(e){
+              console.error('parse error', e, replyData);
                 callback(e, replyData);
                 return;
             }

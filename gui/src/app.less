@@ -27,6 +27,33 @@ gui {
     overflow-y: auto;
   }
 
+  proxies-stats {
+    flex: 1 0 auto;
+
+    display: flex;
+
+    proxy-stats {
+      display: flex;
+      flex-direction: column;
+
+      workers {
+        display: flex;
+        flex-direction: column;
+
+        overflow-y: auto;
+
+        worker-stats {
+          padding: 0 0.2em;
+          display: block;
+
+          &.old-timestamp {
+            background-color: rgba(0, 0, 0, 0.25);
+          }
+        }
+      }
+    }
+  }
+
   side-by-side {
     flex: 1 1 auto;
 
@@ -73,6 +100,10 @@ gui {
 
               &.no-workers {
                 background-color: rgba(0, 0, 0, 1);
+              }
+
+              &.no-workers-available {
+                opacity: 0.4;
               }
 
               full-speed {

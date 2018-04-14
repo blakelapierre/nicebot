@@ -2,7 +2,7 @@ import * as WebSocket from 'ws';
 
 export {start};
 
-const BROADCASTS_TO_SAVE = 5;
+const BROADCASTS_TO_SAVE = 10;
 
 function start(port = 5555) {
   const server = new WebSocket.Server({port});
