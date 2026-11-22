@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>nicebot</title>
+<style>
+  body { font: 14px/1.4 ui-monospace, monospace; margin: 16px; background: #111; color: #e8e8e8; }
+  h1 { font-size: 16px; }
+  h2 { font-size: 13px; margin: 18px 0 6px; color: #9bd; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
+  td, th { border-bottom: 1px solid #333; text-align: left; padding: 3px 8px 3px 0; vertical-align: top; }
+  .bad { color: #f88; }
+  .ok { color: #8f8; }
+  #status { color: #888; }
+</style>
+</head>
+<body>
+<h1>nicebot</h1>
+<div id="status">connecting</div>
+<div id="root"></div>
+<script>
+const status = document.getElementById('status');
+const root = document.getElementById('root');
+let socket;
+function connect() {
+  socket = new WebSocket('ws://' + location.host);
+  socket.onopen = () => status.textContent = 'live view';
+  socket.onclose = () => { status.textContent = 'reconnecting'; setTimeout(connect, 1000); };
+  socket.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'snapshot') render(msg.state || {});
+  };
+}
+function table(headers, rows) {
+  const h = '<tr>' + headers.map(x => '<th>' + x + '</th>').join('') + '</tr>';
+  const b = rows.map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>').join('');
+  return '<table>' + h + b + '</table>';
+}
+function num(n, d) {
+  if (n === undefined || n === null || Number.isNaN(n)) return '';
+  return Number(n).toFixed(d === undefined ? 4 : d);
+}
+function render(s) {
+  const coins = s.coins || [];
+  const orders = s.orders || [];
+  const books = s.books || [];
+  const proxy = (s.proxy && s.proxy.connections) || [];
+  const pools = s.pools || [];
+  const blocks = s.blocks || [];
+  const capital = s.capital || {};
+  const actions = s.actions || [];
+  const log = s.log || [];
+  root.innerHTML = [
+    '<h2>capital</h2>',
+    table(['free BTC', 'locked', 'in flight', 'reserve', 'spent today', 'returned today'], [[
+      num(capital.freeBtc, 6), num(capital.lockedBtc, 6), num(capital.inFlightBtc, 6),
+      num(capital.reserveBtc, 6), num(capital.spentBtc, 6), num(capital.returnedBtc, 6)
+    ]]),
+    '<h2>coins</h2>',
+    table(['tag', 'algo', 'nethash', 'our hash', 'fraction', 'ROI', 'ROI after fee', 'pool'],
+      coins.map(c => [c.tag, c.algorithm, num(c.nethash, 0), num(c.ourHashes, 0), num(c.fraction, 4), num(c.roi, 3), num(c.roiAfterFee, 3), c.pool ? 'yes' : 'no'])),
+    '<h2>books</h2>',
+    table(['algo', 'front', 'weighted', 'accepted'],
+      books.map(b => [b.algorithm, num(b.frontPrice, 6), num(b.weightedPrice, 6), num(b.totalHashes, 3)])),
+    '<h2>orders</h2>',
+    table(['id', 'algo', 'coin', 'price', 'limit', 'accepted', 'next'],
+      orders.map(o => [o.id || '', o.algorithm, o.coin, num(o.price, 6), num(o.limit, 4), num(o.acceptedSpeed, 4), o.next || ''])),
+    '<h2>plan</h2>',
+    table(['op', 'detail'], actions.map(a => [a.op, a.reason || a.coin || a.id || ''])),
+    '<h2>proxy</h2>',
+    table(['user', 'upstream', 'accepted', 'rejected'],
+      proxy.map(p => [p.user, p.upstream, p.accepted, p.rejected])),
+    '<h2>pools</h2>',
+    table(['tag', 'host', 'height', 'network', 'fee', 'maturity', 'hashrate'],
+      pools.map(p => [p.tag, p.host, p.height, p.networkHeight, p.fee, p.maturity, num(p.hashrate, 2)])),
+    '<h2>blocks</h2>',
+    table(['id', 'coin', 'reward', 'state', 'note'],
+      blocks.map(b => [b.id, b.tag, num(b.reward, 4), b.state, b.note || ''])),
+    '<h2>log</h2>',
+    '<pre>' + log.map(l => String(l)).join('\n') + '</pre>'
+  ].join('');
+}
+connect();
+</script>
+</body>
+</html>

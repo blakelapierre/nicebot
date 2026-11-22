@@ -1,0 +1,18 @@
+{
+  "tag": "NEXA",
+  "nethash": 1332990995977,
+  "difficulty": 37243.33818938606,
+  "blockTime": 120,
+  "blockReward": 5000000,
+  "btcPerCoin": 7.312115364578189e-12,
+  "priceFactor": 1000000000000,
+  "marketFactor": 1000000000,
+  "btcUsd": 59068,
+  "wtmReferenceRewards": 585441.15507,
+  "note": "Price is BTC per TH per day. Accepted speed is GH. 9.821 GH/s = 0.009821 TH/s.",
+  "orders": [
+    { "price": 0.008, "acceptedSpeed": 9.82115855, "alive": true },
+    { "price": 0.0079, "acceptedSpeed": 0, "alive": true },
+    { "price": 0.0002, "acceptedSpeed": 0, "alive": true }
+  ]
+}

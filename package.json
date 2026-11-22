@@ -6,6 +6,10 @@
   "main": "index.js",
   "author": "Blake La Pierre",
   "license": "MIT",
+  "scripts": {
+    "start": "node --experimental-strip-types --experimental-detect-module src/main.ts",
+    "test": "node --experimental-strip-types --experimental-detect-module --test test/*.test.ts"
+  },
   "devDependencies": {
     "@types/node": "^8.0.53",
     "babel-core": "^6.26.0",

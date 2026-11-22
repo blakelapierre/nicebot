@@ -1,0 +1,16 @@
+{
+  "tag": "RVN",
+  "nethash": 516229581198,
+  "difficulty": 7214.3,
+  "blockTime": 60,
+  "blockReward": 1250,
+  "btcPerCoin": 1.52115e-8,
+  "priceFactor": 1000000000000,
+  "marketFactor": 1000000000000,
+  "note": "Delivered prices 0.0801 and 0.0612 weight to 0.0717. The 0.0499 order is dust.",
+  "orders": [
+    { "price": 0.0801, "acceptedSpeed": 1.25, "alive": true },
+    { "price": 0.0612, "acceptedSpeed": 1.0, "alive": true },
+    { "price": 0.0499, "acceptedSpeed": 0.0001, "alive": true }
+  ]
+}

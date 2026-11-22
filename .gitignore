@@ -2,3 +2,6 @@ node_modules
 .dist
 container/app
 dev
+.env
+secrets.json
+*.key

@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src/main.ts", "src/roi.ts", "src/optimize.ts", "src/nicehash.ts", "src/feeds.ts", "src/proxy.ts", "src/wallet.ts", "src/config.ts", "src/pools/**/*.ts", "src/gui/**/*.ts", "test/**/*.ts"]
+}
